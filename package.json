@@ -12,7 +12,8 @@
   "scripts": {
     "typecheck": "tsc -b tsconfig.json",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

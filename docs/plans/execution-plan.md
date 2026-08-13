@@ -1,6 +1,6 @@
 # dsh GitHub 连接器 — 执行计划
 
-> 状态：执行中——M1 已完成（`dsh-github` seam 落地，DoD 全绿），当前推进 M2。依据 [design.md](../design/design.md)（设计定稿）拆解为可直接开工的里程碑与任务清单。设计取舍的理由见 [ADR](../adr/README.md)。
+> 状态：执行中——M1–M5 已完成（seam、REST provider、读写六工具 + 审批门、`dsh-github-connect` Device Flow 与 flow-state 落地；M3 的手工验收项待有 dsh 宿主环境后补），当前推进 M6。依据 [design.md](../design/design.md)（设计定稿）拆解为可直接开工的里程碑与任务清单。设计取舍的理由见 [ADR](../adr/README.md)。
 > 原则：每个里程碑结束时**产物独立可用、可测、可合并**；严格按依赖顺序推进，不并行开新面。
 
 ## 0. 总览
@@ -68,11 +68,11 @@ M5 可与 M3/M4 并行（如有人力），但默认串行推进。
 
 ### 验收（DoD）
 
-- [ ] keyless snapshot 测试：所有端点用录制的 fixture 响应回放，无 token 可跑
-- [ ] `*.e2e.ts`：真实 API 冒烟（无 token 自动 skip）
-- [ ] 限流、401、404、422、abort 的映射各有测试
-- [ ] 幂等创建的三条路径（已存在 / 新建 / 竞态 422 兜底）全覆盖
-- [ ] GHES `baseURL` 拼接测试（含尾部斜杠等边界）
+- [x] keyless snapshot 测试：所有端点用录制的 fixture 响应回放，无 token 可跑
+- [x] `*.e2e.ts`：真实 API 冒烟（无 token 自动 skip，`pnpm test:e2e`）
+- [x] 限流、401、404、422、abort 的映射各有测试
+- [x] 幂等创建的三条路径（已存在 / 新建 / 竞态 422 兜底）全覆盖
+- [x] GHES `baseURL` 拼接测试（含尾部斜杠等边界）
 
 ---
 
@@ -90,10 +90,10 @@ M5 可与 M3/M4 并行（如有人力），但默认串行推进。
 
 ### 验收（DoD）
 
-- [ ] snapshot 测试：每个工具的 present 输出定型
-- [ ] diff 截断在超预算 PR fixture 上验证 `truncated: true` 且提示模型"可缩小范围重查"
-- [ ] REAL-composition：preset + seam + fake provider 全链路
-- [ ] **手工验收**：CLI 配 `GITHUB_TOKEN`，模型可搜索/读 issue/读 PR —— 此里程碑后对外可用
+- [x] snapshot 测试：每个工具的 present 输出定型
+- [x] diff 截断在超预算 PR fixture 上验证 `truncated: true` 且提示模型"可缩小范围重查"
+- [x] REAL-composition：preset + seam + fake provider 全链路
+- [ ] **手工验收**：CLI 配 `GITHUB_TOKEN`，模型可搜索/读 issue/读 PR —— 此里程碑后对外可用（待 dsh 宿主环境可用后执行）
 
 ---
 
@@ -108,9 +108,9 @@ M5 可与 M3/M4 并行（如有人力），但默认串行推进。
 
 ### 验收（DoD）
 
-- [ ] 审批通过 / 拒绝 / 超时三条路径测试
-- [ ] `write: false` 时写工具不注册（catalog 里也不出现）
-- [ ] 幂等重试场景 snapshot（两次 `github_pr_create` 第二次 `created: false`）
+- [x] 审批通过 / 拒绝 / 超时（cancelled）三条路径测试（另含审批通道缺失、无 agent 可路由两条降级路径）
+- [x] `write: false` 时写工具不注册（catalog 里也不出现）
+- [x] 幂等重试场景 snapshot（两次 `github_pr_create` 第二次 `created: false`）
 
 ---
 
@@ -136,10 +136,10 @@ M5 可与 M3/M4 并行（如有人力），但默认串行推进。
 
 ### 验收（DoD）
 
-- [ ] Device Flow 状态机全路径测试（pending / slow_down / expired / denied / 成功），GitHub 端点全 mock
-- [ ] flow-state 检测在 fixture git 仓库上测：无领先 / 领先无 PR / PR 开 / PR 合并四态迁移
-- [ ] 回合结束无新提交时不发事件（防噪声）
-- [ ] `credentials/updated` 白名单转发验证
+- [x] Device Flow 状态机全路径测试（pending / slow_down / expired / denied / 成功），GitHub 端点全 mock
+- [x] flow-state 检测在 fixture git 仓库上测：无领先 / 领先无 PR / PR 开 / PR 合并四态迁移
+- [x] 回合结束无新提交时不发事件（防噪声）
+- [x] `credentials/updated` 白名单转发验证（Device Flow 成功 → `credentials.set` → 事件广播全链路测试）
 
 ---
 

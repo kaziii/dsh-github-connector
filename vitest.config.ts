@@ -8,7 +8,7 @@ export default defineConfig({
   plugins: [tsconfigPaths({ projects: ['./tsconfig.base.json'] })],
   test: {
     // *.e2e.ts suites (real-API smoke tests, self-skipping without a token)
-    // run through a dedicated config once a network-facing package exists.
+    // run through vitest.e2e.config.ts (`pnpm test:e2e`).
     include: ['packages/*/*/tests/**/*.spec.ts'],
     coverage: {
       provider: 'v8',
