@@ -4,7 +4,7 @@
 
 A GitHub connector plugin for [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) — connect your GitHub account in one click, then create, review, and merge pull requests without leaving the dsh conversation.
 
-> **Status: design phase.** The packages described below are not published yet — the full architecture lives in [docs/design.md](docs/design.md) (Chinese). The installation steps reflect the intended flow and will be finalized with the first release. Contributions and feedback welcome.
+> **Status: design phase.** See the [documentation index](docs/README.md) (中文): [full architecture](docs/design/design.md), [milestone-by-milestone execution plan](docs/plans/execution-plan.md), and [architecture decision records](docs/adr/README.md). Agent contributors start at [AGENTS.md](AGENTS.md). Contributions and feedback welcome.
 
 ## Introduction
 
