@@ -1,6 +1,6 @@
 # dsh GitHub 连接器 — 执行计划
 
-> 状态：执行计划 v1。依据 [design.md](../design/design.md)（设计定稿）拆解为可直接开工的里程碑与任务清单。设计取舍的理由见 [ADR](../adr/README.md)。
+> 状态：执行中——M1 已完成（`dsh-github` seam 落地，DoD 全绿），当前推进 M2。依据 [design.md](../design/design.md)（设计定稿）拆解为可直接开工的里程碑与任务清单。设计取舍的理由见 [ADR](../adr/README.md)。
 > 原则：每个里程碑结束时**产物独立可用、可测、可合并**；严格按依赖顺序推进，不并行开新面。
 
 ## 0. 总览
@@ -40,11 +40,11 @@ M5 可与 M3/M4 并行（如有人力），但默认串行推进。
 
 ### 验收（DoD）
 
-- [ ] per-file 100% 覆盖率通过
-- [ ] REAL-composition 测试：注册 fake provider → `ctx.github` 各操作可走通
-- [ ] 无 provider、provider 不可用、并发注册两个 provider 的行为都有测试锁定
-- [ ] 截断逻辑单测：`maxFiles` / `maxPatchChars` 边界、`truncated` 标志正确性
-- [ ] 函数插件无 default export（门槛 §8）
+- [x] per-file 100% 覆盖率通过
+- [x] REAL-composition 测试：注册 fake provider → `ctx.github` 各操作可走通
+- [x] 无 provider、provider 不可用、并发注册两个 provider 的行为都有测试锁定
+- [x] 截断逻辑单测：`maxFiles` / `maxPatchChars` 边界、`truncated` 标志正确性
+- [x] 函数插件无 default export（门槛 §8）
 
 ---
 
