@@ -1,6 +1,6 @@
 # dsh GitHub 连接器 — 执行计划
 
-> 状态：执行中——M1–M4 已完成（seam、REST provider、`dsh-tool-github` 读写六工具 + 审批门落地；M3 的手工验收项待有 dsh 宿主环境后补），当前推进 M5。依据 [design.md](../design/design.md)（设计定稿）拆解为可直接开工的里程碑与任务清单。设计取舍的理由见 [ADR](../adr/README.md)。
+> 状态：执行中——M1–M5 已完成（seam、REST provider、读写六工具 + 审批门、`dsh-github-connect` Device Flow 与 flow-state 落地；M3 的手工验收项待有 dsh 宿主环境后补），当前推进 M6。依据 [design.md](../design/design.md)（设计定稿）拆解为可直接开工的里程碑与任务清单。设计取舍的理由见 [ADR](../adr/README.md)。
 > 原则：每个里程碑结束时**产物独立可用、可测、可合并**；严格按依赖顺序推进，不并行开新面。
 
 ## 0. 总览
@@ -136,10 +136,10 @@ M5 可与 M3/M4 并行（如有人力），但默认串行推进。
 
 ### 验收（DoD）
 
-- [ ] Device Flow 状态机全路径测试（pending / slow_down / expired / denied / 成功），GitHub 端点全 mock
-- [ ] flow-state 检测在 fixture git 仓库上测：无领先 / 领先无 PR / PR 开 / PR 合并四态迁移
-- [ ] 回合结束无新提交时不发事件（防噪声）
-- [ ] `credentials/updated` 白名单转发验证
+- [x] Device Flow 状态机全路径测试（pending / slow_down / expired / denied / 成功），GitHub 端点全 mock
+- [x] flow-state 检测在 fixture git 仓库上测：无领先 / 领先无 PR / PR 开 / PR 合并四态迁移
+- [x] 回合结束无新提交时不发事件（防噪声）
+- [x] `credentials/updated` 白名单转发验证（Device Flow 成功 → `credentials.set` → 事件广播全链路测试）
 
 ---
 
