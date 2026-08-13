@@ -1,6 +1,6 @@
 # dsh GitHub 连接器 — 执行计划
 
-> 状态：执行中——M1、M2 已完成（`dsh-github` seam 与 `dsh-github-rest` provider 落地，DoD 全绿），当前推进 M3。依据 [design.md](../design/design.md)（设计定稿）拆解为可直接开工的里程碑与任务清单。设计取舍的理由见 [ADR](../adr/README.md)。
+> 状态：执行中——M1–M4 已完成（seam、REST provider、`dsh-tool-github` 读写六工具 + 审批门落地；M3 的手工验收项待有 dsh 宿主环境后补），当前推进 M5。依据 [design.md](../design/design.md)（设计定稿）拆解为可直接开工的里程碑与任务清单。设计取舍的理由见 [ADR](../adr/README.md)。
 > 原则：每个里程碑结束时**产物独立可用、可测、可合并**；严格按依赖顺序推进，不并行开新面。
 
 ## 0. 总览
@@ -90,10 +90,10 @@ M5 可与 M3/M4 并行（如有人力），但默认串行推进。
 
 ### 验收（DoD）
 
-- [ ] snapshot 测试：每个工具的 present 输出定型
-- [ ] diff 截断在超预算 PR fixture 上验证 `truncated: true` 且提示模型"可缩小范围重查"
-- [ ] REAL-composition：preset + seam + fake provider 全链路
-- [ ] **手工验收**：CLI 配 `GITHUB_TOKEN`，模型可搜索/读 issue/读 PR —— 此里程碑后对外可用
+- [x] snapshot 测试：每个工具的 present 输出定型
+- [x] diff 截断在超预算 PR fixture 上验证 `truncated: true` 且提示模型"可缩小范围重查"
+- [x] REAL-composition：preset + seam + fake provider 全链路
+- [ ] **手工验收**：CLI 配 `GITHUB_TOKEN`，模型可搜索/读 issue/读 PR —— 此里程碑后对外可用（待 dsh 宿主环境可用后执行）
 
 ---
 
@@ -108,9 +108,9 @@ M5 可与 M3/M4 并行（如有人力），但默认串行推进。
 
 ### 验收（DoD）
 
-- [ ] 审批通过 / 拒绝 / 超时三条路径测试
-- [ ] `write: false` 时写工具不注册（catalog 里也不出现）
-- [ ] 幂等重试场景 snapshot（两次 `github_pr_create` 第二次 `created: false`）
+- [x] 审批通过 / 拒绝 / 超时（cancelled）三条路径测试（另含审批通道缺失、无 agent 可路由两条降级路径）
+- [x] `write: false` 时写工具不注册（catalog 里也不出现）
+- [x] 幂等重试场景 snapshot（两次 `github_pr_create` 第二次 `created: false`）
 
 ---
 
