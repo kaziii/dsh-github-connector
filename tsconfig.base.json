@@ -1,0 +1,34 @@
+{
+  // Doubles as the resolution facade for vite-tsconfig-paths (vitest.config.ts
+  // points here). NEVER add include/files to this file: it would leak into
+  // every extending package project and narrow the facade's match-all scope.
+  // Compiler options mirror the dsh monorepo's tsconfig.base.json so packages
+  // developed here can move into the dsh workspace unchanged.
+  "compilerOptions": {
+    "target": "es2024",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "declaration": true,
+    "sourceMap": true,
+    "declarationMap": true,
+    "composite": true,
+    "incremental": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "verbatimModuleSyntax": false,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "types": ["node"],
+    "paths": {
+      "dsh-github": ["./packages/github/github/src"],
+      "dsh-github/invariant": ["./packages/github/github/src/invariant.ts"]
+    }
+  }
+}
