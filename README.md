@@ -1,12 +1,14 @@
 # dsh-github-connector
 
-GitHub connector for [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) — connect your GitHub account with one click, then create, review, and merge pull requests right from the dsh conversation.
+**English** | [简体中文](README.zh-CN.md)
 
-一键连接 GitHub 账号，在 dsh 对话中直接创建 PR、AI 审查 PR、合并 PR。
+A GitHub connector plugin for [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) — connect your GitHub account in one click, then create, review, and merge pull requests without leaving the dsh conversation.
 
 > **Status: design phase.** See the [documentation index](docs/README.md) (中文): [full architecture](docs/design/design.md), [milestone-by-milestone execution plan](docs/plans/execution-plan.md), and [architecture decision records](docs/adr/README.md). Agent contributors start at [AGENTS.md](AGENTS.md). Contributions and feedback welcome.
 
-## What it does
+## Introduction
+
+dsh-github-connector brings the GitHub workflow into your dsh agent sessions:
 
 - **One-click connect** — a "Connect GitHub" button in dsh settings launches the GitHub Device Flow. No token copy-pasting, no config file editing. Tokens are stored through dsh's credential seam and hot-reload on change.
 - **PR bar above the composer** — after the agent finishes a turn, the connector checks git state deterministically (branch ahead of base? open PR? CI status?). When there is something actionable, a slim status bar appears above the input box:
@@ -17,25 +19,45 @@ GitHub connector for [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/dee
 
 Zero AI guessing for the "milestone detection": the trigger is git state, so it costs no tokens and never fires on work that was never committed.
 
-## Architecture
+## Installation
 
-Five packages following dsh's capability-seam pattern (Service Definition / Provider / Consumer):
+### Prerequisites
 
-| Package | Plane | Role |
+- A working [dsh](https://github.com/deepseek-ai/deepseek-harness) installation
+- A GitHub account (github.com or GitHub Enterprise Server)
+- For the CLI/headless path: a GitHub personal access token with `repo` scope
+
+### 1. Add the plugin packages
+
+The connector ships as five packages following dsh's capability-seam pattern. Add the host-plane packages to your dsh host composition, and the tool package to your agent preset:
+
+| Package | Where it goes | Role |
 |---|---|---|
-| `dsh-github` | host | Service Definition — `ctx.github`, normalized GitHub vocabulary, provider registry, typed errors |
-| `dsh-github-rest` | host | Provider — GitHub REST via `fetch`, credential-ref auth, GHES support |
-| `dsh-tool-github` | agent preset | Consumer — model-facing tools registered via `ctx.tools` |
-| `dsh-github-connect` | host | Device Flow auth, git flow-state detection, `@Remote` methods for UI buttons |
-| `dsh-ui-github` | client | Settings "Connect GitHub" section + composer dock PR bar |
+| `dsh-github` | host composition | Service Definition — `ctx.github`, provider registry, typed errors |
+| `dsh-github-rest` | host composition | Provider — GitHub REST via `fetch`, GHES support via `baseURL` |
+| `dsh-github-connect` | host composition | Device Flow auth + git flow-state detection |
+| `dsh-ui-github` | client | Settings section + composer PR bar |
+| `dsh-tool-github` | agent preset | Model-facing tools |
 
-Notable design decisions:
+If you only need the model-side tools (no UI), `dsh-github` + `dsh-github-rest` + `dsh-tool-github` is enough.
 
-- **Device Flow over OAuth callback** — dsh's local port is configurable, so a pre-registered redirect URI cannot be relied on. Device Flow needs only a client id.
-- **Idempotent PR creation** — retrying `github_pr_create` returns the existing open PR (`created: false`) instead of opening a duplicate.
-- **Diff budgets enforced at the seam** — `maxFiles` / `maxPatchChars` are owned by the consumer and enforced in one place, with `truncated` always truthful.
-- **Buttons never fake intelligence** — Create PR / Merge call deterministic host methods (no model turn); AI review submits a prompt and runs as a normal agent turn.
-- **Graceful degradation** — CLI/headless/ACP surfaces fall back to plain tool cards and binary approvals; env-var token config keeps working without the UI.
+### 2. Connect your GitHub account
+
+**Option A — one-click (dsh web UI, recommended):**
+
+1. Open **dsh Settings → Connect GitHub** and click the button.
+2. Your browser opens the GitHub device-authorization page; the user code is copied to your clipboard automatically — paste it and approve.
+3. dsh shows "Connected as @your-username". Done — the token is stored in dsh's credential store, never in a config file.
+
+**Option B — token (CLI / headless / CI):**
+
+Set the `GITHUB_TOKEN` environment variable, or add the token to your `.credentials.yaml`. The provider resolves credentials on every operation, so swapping the token requires no restart.
+
+For GitHub Enterprise Server, additionally point the provider at your instance via its `baseURL` setting.
+
+### 3. Verify
+
+Ask the agent something like *"search GitHub for open issues in my repo"* — the read tools work as soon as credentials resolve. The PR status bar appears automatically once the current project's git remote points at GitHub and your branch is ahead of its base.
 
 ## Roadmap
 
