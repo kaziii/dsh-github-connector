@@ -4,7 +4,7 @@ GitHub connector for [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/dee
 
 一键连接 GitHub 账号，在 dsh 对话中直接创建 PR、AI 审查 PR、合并 PR。
 
-> **Status: design phase.** See [docs/design.md](docs/design.md) (中文) for the full architecture and [docs/execution-plan.md](docs/execution-plan.md) (中文) for the milestone-by-milestone execution plan. Contributions and feedback welcome.
+> **Status: design phase.** See the [documentation index](docs/README.md) (中文): [full architecture](docs/design/design.md), [milestone-by-milestone execution plan](docs/plans/execution-plan.md), and [architecture decision records](docs/adr/README.md). Agent contributors start at [AGENTS.md](AGENTS.md). Contributions and feedback welcome.
 
 ## What it does
 
