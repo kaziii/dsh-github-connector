@@ -3,6 +3,7 @@
   "references": [
     { "path": "./packages/github/github" },
     { "path": "./packages/github/github-rest" },
-    { "path": "./packages/github/tool-github" }
+    { "path": "./packages/github/tool-github" },
+    { "path": "./packages/github/github-connect" }
   ]
 }
