@@ -28,7 +28,9 @@
     "types": ["node"],
     "paths": {
       "dsh-github": ["./packages/github/github/src"],
-      "dsh-github/invariant": ["./packages/github/github/src/invariant.ts"]
+      "dsh-github/invariant": ["./packages/github/github/src/invariant.ts"],
+      "dsh-github-rest": ["./packages/github/github-rest/src"],
+      "dsh-github-rest/invariant": ["./packages/github/github-rest/src/invariant.ts"]
     }
   }
 }
