@@ -1,6 +1,6 @@
 # dsh GitHub 连接器 — 执行计划
 
-> 状态：执行中——M1 已完成（`dsh-github` seam 落地，DoD 全绿），当前推进 M2。依据 [design.md](../design/design.md)（设计定稿）拆解为可直接开工的里程碑与任务清单。设计取舍的理由见 [ADR](../adr/README.md)。
+> 状态：执行中——M1、M2 已完成（`dsh-github` seam 与 `dsh-github-rest` provider 落地，DoD 全绿），当前推进 M3。依据 [design.md](../design/design.md)（设计定稿）拆解为可直接开工的里程碑与任务清单。设计取舍的理由见 [ADR](../adr/README.md)。
 > 原则：每个里程碑结束时**产物独立可用、可测、可合并**；严格按依赖顺序推进，不并行开新面。
 
 ## 0. 总览
@@ -68,11 +68,11 @@ M5 可与 M3/M4 并行（如有人力），但默认串行推进。
 
 ### 验收（DoD）
 
-- [ ] keyless snapshot 测试：所有端点用录制的 fixture 响应回放，无 token 可跑
-- [ ] `*.e2e.ts`：真实 API 冒烟（无 token 自动 skip）
-- [ ] 限流、401、404、422、abort 的映射各有测试
-- [ ] 幂等创建的三条路径（已存在 / 新建 / 竞态 422 兜底）全覆盖
-- [ ] GHES `baseURL` 拼接测试（含尾部斜杠等边界）
+- [x] keyless snapshot 测试：所有端点用录制的 fixture 响应回放，无 token 可跑
+- [x] `*.e2e.ts`：真实 API 冒烟（无 token 自动 skip，`pnpm test:e2e`）
+- [x] 限流、401、404、422、abort 的映射各有测试
+- [x] 幂等创建的三条路径（已存在 / 新建 / 竞态 422 兜底）全覆盖
+- [x] GHES `baseURL` 拼接测试（含尾部斜杠等边界）
 
 ---
 
