@@ -30,7 +30,9 @@
       "dsh-github": ["./packages/github/github/src"],
       "dsh-github/invariant": ["./packages/github/github/src/invariant.ts"],
       "dsh-github-rest": ["./packages/github/github-rest/src"],
-      "dsh-github-rest/invariant": ["./packages/github/github-rest/src/invariant.ts"]
+      "dsh-github-rest/invariant": ["./packages/github/github-rest/src/invariant.ts"],
+      "dsh-tool-github": ["./packages/github/tool-github/src"],
+      "dsh-tool-github/invariant": ["./packages/github/tool-github/src/invariant.ts"]
     }
   }
 }

@@ -1,2 +1,8 @@
 packages:
   - packages/*/*
+  - vendor/*
+
+# The real @deepseek-ai/dsh-type-meta is registry-restricted (types-only peer
+# of dsh-session, never imported at runtime); resolve it to a local stub.
+overrides:
+  "@deepseek-ai/dsh-type-meta": "workspace:*"
