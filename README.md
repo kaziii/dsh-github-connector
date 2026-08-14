@@ -17,10 +17,10 @@ Prerequisites: Node ≥ 22.19, pnpm, and the dsh CLI (`npm install -g @deepseek-
 Install from npm — one command:
 
 ```bash
-dsh plugin --profile web add dsh-github dsh-github-rest dsh-tool-github dsh-github-connect
+dsh plugin --profile web add dsh-github dsh-github-rest dsh-tool-github dsh-github-connect dsh-ui-github
 ```
 
-(Substitute your profile name — `headless`, `tui`, … — for `web`.)
+(Substitute your profile name — `headless`, `tui`, … — for `web`. `dsh-ui-github` renders in the web client only; skip it on non-web profiles.)
 
 Then connect your account: open **dsh Settings → Connect GitHub** and follow the Device Flow, or set the `GITHUB_TOKEN` environment variable (a personal access token with `repo` scope) for CLI / headless use.
 
