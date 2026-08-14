@@ -4,7 +4,7 @@
 
 [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) 的 GitHub 连接器插件 —— 一键连接 GitHub 账号，不离开 dsh 对话即可创建 PR、AI 审查 PR、合并 PR。
 
-> **状态：设计阶段。** 下述包尚未发布，完整架构见 [docs/design.md](docs/design.md)。安装步骤描述的是预期流程，将随首个版本发布定稿。欢迎贡献与反馈。
+> **状态：v1 已实现**（七个里程碑全部完成，见 [CHANGELOG](CHANGELOG.md)）。文档：[索引](docs/README.md)、[架构](docs/design/design.md)、[执行计划](docs/plans/execution-plan.md)、[ADR](docs/adr/README.md)。Agent 贡献者从 [AGENTS.md](AGENTS.md) 开始。欢迎贡献与反馈。
 
 ## 插件介绍
 
@@ -23,13 +23,29 @@ dsh-github-connector 把 GitHub 工作流带进 dsh agent 会话：
 
 ### 前置条件
 
-- 已安装可用的 [dsh](https://github.com/deepseek-ai/deepseek-harness)
+- Node ≥ 22.19 与 pnpm;dsh CLI:`npm install -g @deepseek-ai/dsh`
+- agent 回合需要 `DEEPSEEK_API_KEY`（dsh web 的 Models 页可代存）
 - 一个 GitHub 账号（github.com 或 GitHub Enterprise Server）
 - CLI / headless 路径需要：带 `repo` 权限的 GitHub personal access token
 
 ### 1. 添加插件包
 
-连接器按 dsh 的 capability-seam 模式拆成五个包。宿主平面的包加入 dsh host 组合，工具包加入 agent preset：
+包尚未发布到 npm——从本仓库安装。每个宿主平面的包都声明了 `dsh.bundle` patch,`dsh plugin add` 会自动把它们激活为 profile 层：
+
+```bash
+git clone https://github.com/kaziii/dsh-github-connector.git
+cd dsh-github-connector && pnpm install && pnpm build
+
+dsh plugin --profile headless add \
+  "$PWD/packages/github/github" \
+  "$PWD/packages/github/github-rest" \
+  "$PWD/packages/github/tool-github" \
+  "$PWD/packages/github/github-connect"
+
+dsh --profile headless --dump-config   # 四行出现在组合后的 profile 中
+```
+
+（把 `headless` 换成你的 profile 名——`web`、`tui` 等。）五个包遵循 dsh 的 capability-seam 模式：
 
 | 包 | 安装位置 | 角色 |
 |---|---|---|
@@ -39,7 +55,7 @@ dsh-github-connector 把 GitHub 工作流带进 dsh agent 会话：
 | `dsh-ui-github` | client | 设置页区块 + 输入框 PR 状态条 |
 | `dsh-tool-github` | agent preset | 模型侧工具 |
 
-如果只需要模型侧工具（不要 UI），装 `dsh-github` + `dsh-github-rest` + `dsh-tool-github` 即可。
+如果只需要模型侧工具（不要 UI），装 `dsh-github` + `dsh-github-rest` + `dsh-tool-github` 即可。`dsh-ui-github` 是唯一暂不能经 `dsh plugin add` 激活的包：它渲染在 web 客户端内，等待客户端外壳适配层（[ADR-0007](docs/adr/0007-ui-binds-client-shell-via-port.md)）。
 
 ### 2. 连接 GitHub 账号
 
@@ -57,7 +73,13 @@ dsh-github-connector 把 GitHub 工作流带进 dsh agent 会话：
 
 ### 3. 验证
 
-对 agent 说一句类似 *"搜索一下我仓库里开着的 issue"* —— 凭据可解析后只读工具即可用。当前项目的 git remote 指向 GitHub 且分支领先 base 时，PR 状态条会自动出现。
+```bash
+export DEEPSEEK_API_KEY=sk-…
+export GITHUB_TOKEN=ghp_…
+dsh --profile headless "搜索 octocat/Hello-World 里开着的 issue"
+```
+
+凭据可解析后只读工具即可用。web profile 下，当前项目的 git remote 指向 GitHub 且分支领先 base 时，PR 状态条会自动出现。
 
 ## 路线图
 

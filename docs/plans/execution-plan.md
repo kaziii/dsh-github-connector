@@ -1,6 +1,6 @@
 # dsh GitHub 连接器 — 执行计划
 
-> 状态：M1–M7 全部完成（v1 已实现，见根 [CHANGELOG.md](../../CHANGELOG.md)）。仅剩两项依赖 dsh 宿主环境的手工验收挂起：M3 的 CLI 走查与 M6 的端到端 UI 脚本（后者已写入 [PR #5](https://github.com/kaziii/dsh-github-connector/pull/5) 描述；客户端外壳对接方式见 [ADR-0007](../adr/0007-ui-binds-client-shell-via-port.md)）。依据 [design.md](../design/design.md) 拆解为可直接开工的里程碑与任务清单，设计取舍的理由见 [ADR](../adr/README.md)。
+> 状态：M1–M7 全部完成（v1 已实现，见根 [CHANGELOG.md](../../CHANGELOG.md)）。dsh 宿主 CLI（`@deepseek-ai/dsh`）已验证可安装并激活本连接器（`dsh.bundle` patch，见 M3 验收注记）；仅剩两项手工验收挂起：M3 的模型驱动 CLI 走查（只差真实 API key）与 M6 的端到端 UI 脚本（待客户端外壳适配，已写入 [PR #5](https://github.com/kaziii/dsh-github-connector/pull/5) 描述；对接方式见 [ADR-0007](../adr/0007-ui-binds-client-shell-via-port.md)）。依据 [design.md](../design/design.md) 拆解为可直接开工的里程碑与任务清单，设计取舍的理由见 [ADR](../adr/README.md)。
 > 原则：每个里程碑结束时**产物独立可用、可测、可合并**；严格按依赖顺序推进，不并行开新面。
 
 ## 0. 总览
@@ -93,7 +93,7 @@ M5 可与 M3/M4 并行（如有人力），但默认串行推进。
 - [x] snapshot 测试：每个工具的 present 输出定型
 - [x] diff 截断在超预算 PR fixture 上验证 `truncated: true` 且提示模型"可缩小范围重查"
 - [x] REAL-composition：preset + seam + fake provider 全链路
-- [ ] **手工验收**：CLI 配 `GITHUB_TOKEN`，模型可搜索/读 issue/读 PR —— 此里程碑后对外可用（待 dsh 宿主环境可用后执行）
+- [ ] **手工验收**：CLI 配 `GITHUB_TOKEN`，模型可搜索/读 issue/读 PR —— 此里程碑后对外可用。宿主已可获取（`@deepseek-ai/dsh` CLI），且已在真实宿主中验证到 agent 完整装配：四包经 `dsh.bundle` patch 激活为 profile 层、插件装载无错、请求到达 DeepSeek API（假 key 得 403）。剩余步骤仅为配真实 `DEEPSEEK_API_KEY` + `GITHUB_TOKEN` 走模型驱动的搜索/读取（安装步骤见根 README"Installation"）
 
 ---
 
