@@ -34,7 +34,9 @@
       "dsh-tool-github": ["./packages/github/tool-github/src"],
       "dsh-tool-github/invariant": ["./packages/github/tool-github/src/invariant.ts"],
       "dsh-github-connect": ["./packages/github/github-connect/src"],
-      "dsh-github-connect/invariant": ["./packages/github/github-connect/src/invariant.ts"]
+      "dsh-github-connect/invariant": ["./packages/github/github-connect/src/invariant.ts"],
+      "dsh-ui-github": ["./packages/github/ui-github/src"],
+      "dsh-ui-github/invariant": ["./packages/github/ui-github/src/invariant.ts"]
     }
   }
 }
