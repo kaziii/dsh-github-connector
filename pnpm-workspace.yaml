@@ -1,5 +1,6 @@
 packages:
   - packages/*/*
+  - examples/*
   - vendor/*
 
 # The real @deepseek-ai/dsh-type-meta is registry-restricted (types-only peer

@@ -1,0 +1,103 @@
+{
+  "generatedBy": "scripts/gen-tool-catalog.ts",
+  "note": "Boot manifest snapshot of every model-facing tool this repository registers. Regenerate with `pnpm gen:catalog`; `pnpm gate:catalog` fails on drift.",
+  "packages": [
+    {
+      "package": "dsh-tool-github",
+      "plugin": "tool-github",
+      "variants": {
+        "default": [
+          {
+            "name": "github_issue_comment",
+            "description": "Post a comment on a GitHub issue or pull request. The user is asked to approve before anything is posted.",
+            "parameters": [
+              "body",
+              "number",
+              "repo"
+            ]
+          },
+          {
+            "name": "github_issue_create",
+            "description": "Create a GitHub issue. The user is asked to approve before anything is created.",
+            "parameters": [
+              "body",
+              "labels",
+              "repo",
+              "title"
+            ]
+          },
+          {
+            "name": "github_issue_read",
+            "description": "Read one GitHub issue: title, state, labels, body, and its conversation comments.",
+            "parameters": [
+              "max_comments",
+              "number",
+              "repo"
+            ]
+          },
+          {
+            "name": "github_pr_create",
+            "description": "Open a GitHub pull request from an existing branch. Idempotent: if an open PR for the same head/base already exists it is returned instead of failing. The user is asked to approve before anything is created.",
+            "parameters": [
+              "base",
+              "body",
+              "draft",
+              "head",
+              "repo",
+              "title"
+            ]
+          },
+          {
+            "name": "github_pr_read",
+            "description": "Read one GitHub pull request. part=metadata (default) returns title/state/branches/body; part=diff returns the changed files with patches (budgeted); part=comments returns the conversation; part=checks returns CI check runs.",
+            "parameters": [
+              "max_comments",
+              "number",
+              "part",
+              "repo"
+            ]
+          },
+          {
+            "name": "github_search",
+            "description": "Search GitHub for issues, pull requests, repositories, or code. Returns a lean list of hits; read an issue or PR directly with github_issue_read / github_pr_read using the owner/repo and number of a hit.",
+            "parameters": [
+              "kind",
+              "max_results",
+              "query"
+            ]
+          }
+        ],
+        "read-only": [
+          {
+            "name": "github_issue_read",
+            "description": "Read one GitHub issue: title, state, labels, body, and its conversation comments.",
+            "parameters": [
+              "max_comments",
+              "number",
+              "repo"
+            ]
+          },
+          {
+            "name": "github_pr_read",
+            "description": "Read one GitHub pull request. part=metadata (default) returns title/state/branches/body; part=diff returns the changed files with patches (budgeted); part=comments returns the conversation; part=checks returns CI check runs.",
+            "parameters": [
+              "max_comments",
+              "number",
+              "part",
+              "repo"
+            ]
+          },
+          {
+            "name": "github_search",
+            "description": "Search GitHub for issues, pull requests, repositories, or code. Returns a lean list of hits; read an issue or PR directly with github_issue_read / github_pr_read using the owner/repo and number of a hit.",
+            "parameters": [
+              "kind",
+              "max_results",
+              "query"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

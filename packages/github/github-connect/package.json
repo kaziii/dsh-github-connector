@@ -23,9 +23,8 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "lib/index.js",
-    "lib/invariant.js",
-    "lib/types/**/*.d.ts"
+    "lib",
+    "src"
   ],
   "license": "MIT",
   "peerDependencies": {
