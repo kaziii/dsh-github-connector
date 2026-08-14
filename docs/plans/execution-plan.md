@@ -1,6 +1,6 @@
 # dsh GitHub 连接器 — 执行计划
 
-> 状态：执行中——M1–M5 已完成（seam、REST provider、读写六工具 + 审批门、`dsh-github-connect` Device Flow 与 flow-state 落地；M3 的手工验收项待有 dsh 宿主环境后补），当前推进 M6。依据 [design.md](../design/design.md)（设计定稿）拆解为可直接开工的里程碑与任务清单。设计取舍的理由见 [ADR](../adr/README.md)。
+> 状态：执行中——M1–M6 已完成（seam、REST provider、读写六工具 + 审批门、`dsh-github-connect` Device Flow 与 flow-state、`dsh-ui-github` 设置区块 + PR 状态条，客户端外壳经注入端口对接见 [ADR-0007](../adr/0007-ui-binds-client-shell-via-port.md)；M3/M6 的手工验收项待有 dsh 宿主环境后补），当前推进 M7。依据 [design.md](../design/design.md)（设计定稿）拆解为可直接开工的里程碑与任务清单。设计取舍的理由见 [ADR](../adr/README.md)。
 > 原则：每个里程碑结束时**产物独立可用、可测、可合并**；严格按依赖顺序推进，不并行开新面。
 
 ## 0. 总览
@@ -160,9 +160,9 @@ M5 可与 M3/M4 并行（如有人力），但默认串行推进。
 
 ### 验收（DoD）
 
-- [ ] 组件测试：四态渲染 + 事件驱动迁移
-- [ ] 断开连接后状态条立即消失
-- [ ] **端到端手工验收脚本**（写进 PR 描述）：连接 → agent 提交 → 状态条出现 → 创建 PR → CI 徽章 → AI 审查 → merge → 收起
+- [x] 组件测试：四态渲染 + 事件驱动迁移
+- [x] 断开连接后状态条立即消失
+- [ ] **端到端手工验收脚本**（写进 PR 描述）：连接 → agent 提交 → 状态条出现 → 创建 PR → CI 徽章 → AI 审查 → merge → 收起（待 dsh 宿主环境与客户端外壳适配可用后执行，见 ADR-0007 后果）
 
 ---
 

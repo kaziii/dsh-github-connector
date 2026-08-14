@@ -36,6 +36,15 @@ function git(args: string[], cwd: string): Promise<string> {
   })
 }
 
+// The keyless gate must hold even on machines that export GITHUB_TOKEN (CI
+// runners, cloud sandboxes): the service's env fallback would satisfy the
+// "no credential" tests, so the suite parks the variable and restores it.
+const inheritedToken = process.env.GITHUB_TOKEN
+delete process.env.GITHUB_TOKEN
+afterAll(() => {
+  if (inheritedToken !== undefined) process.env.GITHUB_TOKEN = inheritedToken
+})
+
 const repos: string[] = []
 
 afterAll(async () => {

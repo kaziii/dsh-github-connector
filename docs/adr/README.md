@@ -24,3 +24,4 @@
 | [0004](0004-idempotent-pr-creation.md) | PR 创建幂等化 | Accepted |
 | [0005](0005-diff-budgets-enforced-at-seam.md) | diff 预算由 consumer 持有、seam 统一执行 | Accepted |
 | [0006](0006-fetch-instead-of-octokit.md) | 直接使用 fetch 调 REST，不引入 octokit | Accepted |
+| [0007](0007-ui-binds-client-shell-via-port.md) | `dsh-ui-github` 通过注入端口对接客户端外壳 | Accepted |

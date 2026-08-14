@@ -1,0 +1,50 @@
+{
+  "name": "dsh-ui-github",
+  "description": "GitHub workflow UI for the DeepSeek Harness web client — the Connect GitHub settings section and the conversation PR status bar (create / AI-review / merge), driven entirely by dsh-github-connect's @Remote methods and forwarded events, bound to the client shell through a narrow injected port",
+  "version": "0.1.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kaziii/dsh-github-connector.git",
+    "directory": "packages/github/ui-github"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-credentials": "^0.0.1-rc.1",
+    "@deepseek-ai/dsh-invariants": "^0.0.1-rc.1",
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.0-rc.6",
+    "dsh-github-connect": "^0.1.0",
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-credentials": "^0.0.1-rc.1",
+    "@deepseek-ai/dsh-invariants": "^0.0.1-rc.1",
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.0-rc.6",
+    "@types/react": "^19.2.18",
+    "dsh-github": "workspace:*",
+    "dsh-github-connect": "workspace:*",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  }
+}
