@@ -33,6 +33,7 @@ import {
   type FlowStateDeps,
   type GitHubFlowState,
 } from './flow-state.ts'
+import { commitLogFormat, derivePrDraft, parseCommitLog, type DraftCommit, type PrDraft } from './pr-draft.ts'
 
 export {
   pollForToken,
@@ -54,6 +55,14 @@ export {
   type FlowStateSnapshot,
   type GitHubFlowState,
 } from './flow-state.ts'
+export {
+  commitLogFormat,
+  derivePrDraft,
+  parseCommitLog,
+  titleFromBranch,
+  type DraftCommit,
+  type PrDraft,
+} from './pr-draft.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -293,6 +302,30 @@ export class GitHubConnectService extends TypertRemoteService {
     if (credentials === undefined) return
     await credentials.unset(credentialRef(this.config.credentialRef))
     this.statusCache = undefined
+  }
+
+  /**
+   * Prefill the [Create PR] panel (design §6: title/body arrive prefilled by
+   * the host, edited by the user). Deterministic derivation from the commits
+   * ahead of base — zero model turns, zero GitHub requests.
+   * @returns the draft title and optional body.
+   */
+  @Remote
+  async prDraft(): Promise<PrDraft> {
+    const facts = await this.repoFacts()
+    return derivePrDraft(facts.branch, await this.commitsAhead(facts.base))
+  }
+
+  /** Commits ahead of base, oldest first: prefer the remote-tracking base, else the local one, else none. */
+  private async commitsAhead(base: string): Promise<readonly DraftCommit[]> {
+    for (const range of [`origin/${base}..HEAD`, `${base}..HEAD`]) {
+      try {
+        return parseCommitLog(await this.runGit(['log', '--reverse', commitLogFormat, range], this.cwd()))
+      } catch {
+        // Base ref absent in this form — try the next.
+      }
+    }
+    return []
   }
 
   /**

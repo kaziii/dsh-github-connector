@@ -6,7 +6,7 @@
 
 1. **Device Flow 授权**（ADR-0001）：`startDeviceFlow()` 立即返回 user code，后台按服务端节奏轮询（`authorization_pending` 继续、`slow_down` 加 5 秒、`expired_token` / `access_denied` 终止）。成功后 token 落入**凭据 seam**（`credentials.set`）——正是其 `credentials/updated` 事件让所有消费方即时刷新，无需重启，且 token 值从不经过前端。v1 使用不过期授权；refresh token 的空白在其将来落点处以代码注释记录。
 2. **确定性 flow-state 检测**（ADR-0002）：每次 `agent/turn-stopping` 后，廉价 git 事实（当前分支、head sha、领先数）加一次分支 PR 查询，归纳为四态状态机——`hidden` / `pr-ready` / `pr-open`（带 CI 汇总）/ `pr-merged`——经 `github/flow-state` 事件推送。硬门控：非 GitHub remote 或凭据不可解析 ⇒ 零事件（未连接用户对功能无感知）。没有新提交的回合不发事件（防噪声）。检测绝不向回合抛错。
-3. **`@Remote` 按钮方法**（design §6，零模型回合）：`connectStatus()`（带缓存的登录名查询）、`startDeviceFlow()`、`deviceFlowStatus()`、`disconnect()`、`createPr()`（分支/base 取自 git，经 seam 幂等创建）、`mergePr()`（squash / merge / rebase；405/409 映射为 `GITHUB_MERGE_BLOCKED`）、供徽章轮询的 `prChecks()` 与 `refreshFlowState()`——轮询节奏由**前端**掌控，页面不可见即停。
+3. **`@Remote` 按钮方法**（design §6，零模型回合）：`connectStatus()`（带缓存的登录名查询）、`startDeviceFlow()`、`deviceFlowStatus()`、`disconnect()`、`prDraft()`（从领先 base 的提交确定性推导标题/描述预填）、`createPr()`（分支/base 取自 git，经 seam 幂等创建）、`mergePr()`（squash / merge / rebase；405/409 映射为 `GITHUB_MERGE_BLOCKED`）、供徽章轮询的 `prChecks()` 与 `refreshFlowState()`——轮询节奏由**前端**掌控，页面不可见即停。
 
 ## 配置
 

@@ -9,10 +9,14 @@ import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 import GitHubRuntime, { GitHubError, type GitHubProvider } from 'dsh-github'
 import GitHubConnectService, {
   DEFAULT_CLIENT_ID,
+  commitLogFormat,
   defaultSleep,
+  derivePrDraft,
   detectBaseBranch,
   detectFlowState,
+  parseCommitLog,
   parseGitHubRemote,
+  titleFromBranch,
   pollForToken,
   requestDeviceCode,
   runDeviceFlow,
@@ -715,6 +719,62 @@ describe('GitHubConnectService flow-state over agent turns', () => {
     await suite.credentials.set('GITHUB_TOKEN' as CredentialRef, 'gho_1')
     await expect(suite.service.refreshFlowState()).resolves.toEqual({ kind: 'hidden' })
     expect(suite.flowStates).toHaveLength(0)
+  })
+})
+
+describe('PR draft derivation', () => {
+  it('humanizes branch names, promoting a conventional-commit first segment', () => {
+    expect(titleFromBranch('feat/add-login')).toBe('feat: add login')
+    expect(titleFromBranch('docs/root_readme/improvements')).toBe('docs: root readme improvements')
+    expect(titleFromBranch('fix-typo')).toBe('fix typo')
+    expect(titleFromBranch('wip/')).toBe('wip')
+    expect(titleFromBranch('---')).toBe('---')
+  })
+
+  it('lends a single commit its subject and body, dropping an empty body', () => {
+    expect(derivePrDraft('feat/x', [{ subject: 'feat: one', body: 'Details.' }]))
+      .toEqual({ title: 'feat: one', body: 'Details.' })
+    expect(derivePrDraft('feat/x', [{ subject: 'feat: one', body: '  ' }]))
+      .toEqual({ title: 'feat: one' })
+  })
+
+  it('folds several commits into a branch title over a subject list, and none into the title alone', () => {
+    expect(derivePrDraft('feat/x', [
+      { subject: 'feat: a', body: '' },
+      { subject: 'fix: b', body: 'ignored' },
+    ])).toEqual({ title: 'feat: x', body: '- feat: a\n- fix: b' })
+    expect(derivePrDraft('feat/x', [])).toEqual({ title: 'feat: x' })
+  })
+
+  it('parses the separator-framed git log format', () => {
+    const [field, record] = ['', '']
+    expect(commitLogFormat).toBe('--format=%s%x1f%b%x1e')
+    expect(parseCommitLog('')).toEqual([])
+    expect(parseCommitLog(`a${field}${record}\nb${field}line 1\nline 2\n${record}\n`)).toEqual([
+      { subject: 'a', body: '' },
+      { subject: 'b', body: 'line 1\nline 2' },
+    ])
+    // A record without the field separator still yields a subject.
+    expect(parseCommitLog(`bare${record}`)).toEqual([{ subject: 'bare', body: '' }])
+  })
+
+  it('prDraft folds the commits ahead of the remote-tracking base', async () => {
+    const dir = await makeRepo({ remote: 'git@github.com:octo/hello-world.git', branch: 'feat/x', ahead: 2 })
+    const suite = await mountService({ cwd: dir })
+    await expect(suite.service.prDraft()).resolves.toEqual({ title: 'feat: x', body: '- ahead 0\n- ahead 1' })
+  })
+
+  it('prDraft lends a single commit its subject and body through the local base fallback', async () => {
+    const dir = await makeRepo({ remote: 'git@github.com:octo/hello-world.git', branch: 'feat/y', originRef: false })
+    await git(['commit', '--allow-empty', '-m', 'feat: ship y', '-m', 'Adds y end to end.'], dir)
+    const suite = await mountService({ cwd: dir })
+    await expect(suite.service.prDraft()).resolves.toEqual({ title: 'feat: ship y', body: 'Adds y end to end.' })
+  })
+
+  it('prDraft falls back to the branch title when no base range resolves', async () => {
+    const dir = await makeRepo({ remote: 'git@github.com:octo/hello-world.git', branch: 'feat/z', ahead: 1 })
+    const suite = await mountService({ cwd: dir, baseBranch: 'no-such-base' })
+    await expect(suite.service.prDraft()).resolves.toEqual({ title: 'feat: z' })
   })
 })
 

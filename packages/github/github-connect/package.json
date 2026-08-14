@@ -1,7 +1,7 @@
 {
   "name": "dsh-github-connect",
   "description": "GitHub connect service for the DeepSeek Harness — Device Flow authorization storing the token through the credentials seam, deterministic git flow-state detection driving the conversation PR status bar, and @Remote methods (connectStatus / startDeviceFlow / createPr / mergePr) for zero-model-turn UI buttons",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/kaziii/dsh-github-connector.git",
