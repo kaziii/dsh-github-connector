@@ -1,0 +1,8 @@
+# The dsh-tool-github bundle patch: register the model-facing `github_*` tool suite.
+# One insert; row order carries no load semantics (activation is
+# service-availability driven), so installing the connector packages in any
+# order composes the same host.
+
+- insert:
+    - id: tool-github
+      name: dsh-tool-github

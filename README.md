@@ -4,7 +4,7 @@
 
 A GitHub connector plugin for [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) — connect your GitHub account in one click, then create, review, and merge pull requests without leaving the dsh conversation.
 
-> **Status: design phase.** See the [documentation index](docs/README.md) (中文): [full architecture](docs/design/design.md), [milestone-by-milestone execution plan](docs/plans/execution-plan.md), and [architecture decision records](docs/adr/README.md). Agent contributors start at [AGENTS.md](AGENTS.md). Contributions and feedback welcome.
+> **Status: v1 implemented** (all seven milestones; see [CHANGELOG](CHANGELOG.md)). Docs (中文): [documentation index](docs/README.md), [architecture](docs/design/design.md), [execution plan](docs/plans/execution-plan.md), [ADRs](docs/adr/README.md). Agent contributors start at [AGENTS.md](AGENTS.md). Contributions and feedback welcome.
 
 ## Introduction
 
@@ -23,13 +23,29 @@ Zero AI guessing for the "milestone detection": the trigger is git state, so it 
 
 ### Prerequisites
 
-- A working [dsh](https://github.com/deepseek-ai/deepseek-harness) installation
+- Node ≥ 22.19 and pnpm; the dsh CLI: `npm install -g @deepseek-ai/dsh`
+- A `DEEPSEEK_API_KEY` for agent turns (the dsh web Models page can store it)
 - A GitHub account (github.com or GitHub Enterprise Server)
 - For the CLI/headless path: a GitHub personal access token with `repo` scope
 
 ### 1. Add the plugin packages
 
-The connector ships as five packages following dsh's capability-seam pattern. Add the host-plane packages to your dsh host composition, and the tool package to your agent preset:
+The packages are not on npm yet — install them from this repository. Each host-plane package declares a `dsh.bundle` patch, so `dsh plugin add` activates it as a profile layer automatically:
+
+```bash
+git clone https://github.com/kaziii/dsh-github-connector.git
+cd dsh-github-connector && pnpm install && pnpm build
+
+dsh plugin --profile headless add \
+  "$PWD/packages/github/github" \
+  "$PWD/packages/github/github-rest" \
+  "$PWD/packages/github/tool-github" \
+  "$PWD/packages/github/github-connect"
+
+dsh --profile headless --dump-config   # the four rows appear as profile layers
+```
+
+(Substitute your profile name — `web`, `tui`, … — for `headless`.) The five packages follow dsh's capability-seam pattern:
 
 | Package | Where it goes | Role |
 |---|---|---|
@@ -39,7 +55,7 @@ The connector ships as five packages following dsh's capability-seam pattern. Ad
 | `dsh-ui-github` | client | Settings section + composer PR bar |
 | `dsh-tool-github` | agent preset | Model-facing tools |
 
-If you only need the model-side tools (no UI), `dsh-github` + `dsh-github-rest` + `dsh-tool-github` is enough.
+If you only need the model-side tools (no UI), `dsh-github` + `dsh-github-rest` + `dsh-tool-github` is enough. `dsh-ui-github` is the one package `dsh plugin add` cannot activate yet: it renders inside the web client and waits on the client-shell adapter ([ADR-0007](docs/adr/0007-ui-binds-client-shell-via-port.md)).
 
 ### 2. Connect your GitHub account
 
@@ -57,7 +73,13 @@ For GitHub Enterprise Server, additionally point the provider at your instance v
 
 ### 3. Verify
 
-Ask the agent something like *"search GitHub for open issues in my repo"* — the read tools work as soon as credentials resolve. The PR status bar appears automatically once the current project's git remote points at GitHub and your branch is ahead of its base.
+```bash
+export DEEPSEEK_API_KEY=sk-…
+export GITHUB_TOKEN=ghp_…
+dsh --profile headless "search GitHub for open issues in octocat/Hello-World"
+```
+
+The read tools work as soon as credentials resolve. In the web profile, the PR status bar appears automatically once the current project's git remote points at GitHub and your branch is ahead of its base.
 
 ## Roadmap
 
