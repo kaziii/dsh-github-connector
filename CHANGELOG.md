@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+The dsh client adapter (ADR-0008/ADR-0009), landing the real web-deployment path for `dsh-ui-github`:
+
+- **Polling instead of forwarded events (ADR-0009)** — dsh forwards no custom host events to the browser, so the UI now drives itself: the connect card polls the new `@Remote deviceFlowStatus()` at the server-dictated pace (a superseded flow's updates are dropped host-side), and the status bar polls `refreshFlowState` with backoff, pauses while hidden, keeps open dropdowns and drafts across unchanged rounds, folds CI changes into the badge in place, and remembers a collapsed merged banner. The Typert event selection narrows to `credentials/updated`.
+- **`dsh-ui-github/client` (ADR-0008)** — the shipped dsh client half: `dsh.client` manifest + `exports["./client"]`, an empty node `apply` anchored by the package's own `cordis.patch.yml` (so `dsh plugin add` wires the whole UI), a hand-written strict `githubConnect` Typert contribution self-mounted through `ctx.remote.$mount` (no dsh-repo change), the browser shell adapter (plugin-config card, session-scoped [AI review] prompt, http(s)-only external links, clipboard, visibility), and `lib/client.js` built as the dsh CJS closure factory (`scripts/build-client-bundle.ts`, esbuild).
+
 ## 0.1.0 (2026-08-14) — v1
 
 First implemented release of the dsh GitHub connector: milestones M1–M7 of the [execution plan](docs/plans/execution-plan.md), against the [v1 design](docs/design/design.md). All packages ship at `0.1.0`.

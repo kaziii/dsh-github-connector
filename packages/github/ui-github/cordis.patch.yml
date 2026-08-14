@@ -1,0 +1,9 @@
+# The dsh-ui-github bundle patch: mount the web UI's node half so the dsh
+# client-module scanner discovers the package (its `dsh.client` manifest) and
+# serves lib/client.js into the browser, where the client half self-mounts the
+# githubConnect Remote face and registers the connect card and PR status bar
+# (ADR-0008/ADR-0009). One insert; row order carries no load semantics.
+
+- insert:
+    - id: ui-github
+      name: dsh-ui-github

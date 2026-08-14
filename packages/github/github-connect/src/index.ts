@@ -176,6 +176,7 @@ export class GitHubConnectService extends TypertRemoteService {
   pendingFlow: Promise<void> | undefined
 
   private activeFlow: AbortController | undefined
+  private lastFlowUpdate: DeviceFlowUpdate | undefined
   private lastHead: string | undefined
   private lastEmitted: GitHubFlowState['kind'] = 'hidden'
   private statusCache: { token: string, login: string } | undefined
@@ -234,6 +235,7 @@ export class GitHubConnectService extends TypertRemoteService {
     this.activeFlow?.abort()
     const controller = new AbortController()
     this.activeFlow = controller
+    this.lastFlowUpdate = undefined
     const deps: DeviceFlowDeps = {
       fetch: this.fetchImpl,
       sleep: this.sleep,
@@ -241,19 +243,37 @@ export class GitHubConnectService extends TypertRemoteService {
       clientId,
       scope: this.config.scope,
       signal: controller.signal,
-      onUpdate: update => void this.ctx.emit('github/device-flow', update),
+      onUpdate: update => this.pushFlowUpdate(controller, update),
     }
     const { prompt, deviceCode } = await requestDeviceCode(deps)
-    this.ctx.emit('github/device-flow', { phase: 'awaiting-authorization', prompt })
+    this.pushFlowUpdate(controller, { phase: 'awaiting-authorization', prompt })
     this.pendingFlow = pollForToken(deps, deviceCode, prompt.interval)
       .then(async token => {
         await credentials.set(credentialRef(this.config.credentialRef), token)
-        this.ctx.emit('github/device-flow', { phase: 'authorized' })
+        this.pushFlowUpdate(controller, { phase: 'authorized' })
       })
       .catch((error: unknown) => {
-        this.ctx.emit('github/device-flow', terminalUpdate(error))
+        this.pushFlowUpdate(controller, terminalUpdate(error))
       })
     return prompt
+  }
+
+  /**
+   * The latest Device Flow progress — the settings card's polling source
+   * (ADR-0009: dsh does not forward custom host events to the browser, so the
+   * frontend polls this instead of subscribing to `github/device-flow`).
+   * @returns the last update of the active flow, or undefined before any flow.
+   */
+  @Remote
+  deviceFlowStatus(): DeviceFlowUpdate | undefined {
+    return this.lastFlowUpdate
+  }
+
+  /** Record progress for {@link deviceFlowStatus} and emit the host-internal event, dropping updates from a superseded flow. */
+  private pushFlowUpdate(flow: AbortController, update: DeviceFlowUpdate): void {
+    if (this.activeFlow !== flow) return
+    this.lastFlowUpdate = update
+    this.ctx.emit('github/device-flow', update)
   }
 
   /**

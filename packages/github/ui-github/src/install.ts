@@ -15,6 +15,8 @@ import { PrStatusBar, type PollPolicy, type StatusBarTimers } from './status-bar
 export interface GitHubUiOptions {
   readonly locale?: UiLocale
   readonly poll?: PollPolicy
+  /** Flow-state poll pacing (ADR-0009), independent of the CI badge's. */
+  readonly flowPoll?: PollPolicy
   readonly collapseMs?: number
   readonly timers?: StatusBarTimers
 }
@@ -28,16 +30,18 @@ export interface GitHubUiOptions {
  */
 export function installGitHubUi(shell: GitHubUiShell, remote: GitHubUiRemote, options: GitHubUiOptions = {}): () => void {
   const locale = options.locale === undefined ? {} : { locale: options.locale }
+  const timers = options.timers === undefined ? {} : { timers: options.timers }
   const offSection = shell.registerSlot('settings.section', () =>
-    h(ConnectGitHubSection, { remote, shell, ...locale }))
+    h(ConnectGitHubSection, { remote, shell, ...locale, ...timers }))
   const offDock = shell.registerSlot('conversation.input.dock', () =>
     h(PrStatusBar, {
       remote,
       shell,
       ...locale,
+      ...timers,
       ...options.poll === undefined ? {} : { poll: options.poll },
+      ...options.flowPoll === undefined ? {} : { flowPoll: options.flowPoll },
       ...options.collapseMs === undefined ? {} : { collapseMs: options.collapseMs },
-      ...options.timers === undefined ? {} : { timers: options.timers },
     }))
   return () => {
     offSection()

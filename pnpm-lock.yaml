@@ -32,6 +32,9 @@ importers:
       dsh-tool-github:
         specifier: workspace:*
         version: link:packages/github/tool-github
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
       jsdom:
         specifier: ^30.0.1
         version: 30.0.1

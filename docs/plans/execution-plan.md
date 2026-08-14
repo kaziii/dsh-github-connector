@@ -162,7 +162,7 @@ M5 可与 M3/M4 并行（如有人力），但默认串行推进。
 
 - [x] 组件测试：四态渲染 + 事件驱动迁移
 - [x] 断开连接后状态条立即消失
-- [ ] **端到端手工验收脚本**（写进 PR 描述）：连接 → agent 提交 → 状态条出现 → 创建 PR → CI 徽章 → AI 审查 → merge → 收起（绑定路径已由 ADR-0008 确定并经源码级验证：`./client` 半侧适配层 + `settings.plugin.item` 卡片 + `ctx.remote.$mount`；事件订阅按 ADR-0009 收窄为 `credentials/updated` + 轮询。待适配层落地后执行）
+- [ ] **端到端手工验收脚本**（写进 PR 描述）：连接 → agent 提交 → 状态条出现 → 创建 PR → CI 徽章 → AI 审查 → merge → 收起（适配层已落地：`dsh-ui-github/client` 半侧 + 自带 `cordis.patch.yml`，`dsh plugin add` 即接全链路;事件面按 ADR-0009 为 `credentials/updated` + 轮询。剩余步骤仅为在真实 dsh 宿主里执行脚本本身）
 
 ---
 
