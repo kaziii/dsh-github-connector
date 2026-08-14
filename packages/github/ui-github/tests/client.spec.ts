@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import type { InvocationDescriptor } from '@deepseek-ai/dsh-typert-protocol'
 import { ConnectGitHubSection, PrStatusBar } from 'dsh-ui-github'
+import type { GitHubUiRemote } from '../src/types.ts'
 import { GITHUB_CONNECT_REMOTE } from '../src/client/contribution.ts'
 import { apply, detectLocale, inject, name } from '../src/client/index.ts'
 import { createBrowserShell } from '../src/client/shell.ts'
@@ -44,6 +45,8 @@ function fakeClientCtx() {
       $mount: vi.fn(async () => async () => {}),
       $on: vi.fn(() => () => {}),
     },
+    namespace: { marker: 'githubConnect-namespace' },
+    get: vi.fn((key: string) => key === 'remote.githubConnect' ? raw.namespace : undefined),
     effect: vi.fn((callback: () => () => void) => callback()),
   }
   return { ctx: raw as unknown as Context, raw, injected, registrations, sends }
@@ -266,6 +269,21 @@ describe('client apply', () => {
     dispose()
     expect(suite.registrations).toHaveLength(0)
     document.documentElement.lang = ''
+  })
+
+  it('hands the surfaces a remote face that resolves the namespace inject-free', async () => {
+    const suite = fakeClientCtx()
+    await apply(suite.ctx)
+    const dock = suite.registrations[1]!.component({}) as ReactElement<{ remote: GitHubUiRemote }>
+    const remote = dock.props.remote
+    // The namespace is never the service-proxy path (which would demand an
+    // inject this plugin cannot declare): each access goes through ctx.get.
+    expect(remote.githubConnect).toBe(suite.raw.namespace)
+    expect(suite.raw.get).toHaveBeenCalledWith('remote.githubConnect')
+    // $on still rides the injected gateway face.
+    const listener = (): void => {}
+    remote.$on('credentials/updated', listener)
+    expect(suite.raw.remote.$on).toHaveBeenCalledWith('credentials/updated', listener)
   })
 
   it('falls back to the navigator language when the page declares none', async () => {

@@ -10,6 +10,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { UiLocale } from '../i18n.ts'
 import { installGitHubUi } from '../install.ts'
+import type { GitHubUiRemote } from '../types.ts'
 import { GITHUB_CONNECT_REMOTE } from './contribution.ts'
 import { createBrowserShell } from './shell.ts'
 import type {} from './shims.ts'
@@ -36,5 +37,16 @@ export async function apply(ctx: Context): Promise<void> {
   await ctx.remote.$mount(GITHUB_CONNECT_REMOTE)
   const shell = createBrowserShell(ctx)
   const locale = detectLocale(document.documentElement.lang === '' ? navigator.language : document.documentElement.lang)
-  ctx.effect(() => installGitHubUi(shell, ctx.remote, { locale }), 'ui-github.install')
+  // The UI must not reach the namespace through the service proxy: that path
+  // re-enters the inject check with `remote.githubConnect`, which this plugin
+  // cannot declare (it mounts the namespace itself — see `inject` above).
+  // `ctx.get` is the inject-free resolution for exactly this case, deferred
+  // per access so the face survives a gateway remount.
+  const remote: GitHubUiRemote = {
+    get githubConnect(): GitHubUiRemote['githubConnect'] {
+      return ctx.get('remote.githubConnect') as GitHubUiRemote['githubConnect']
+    },
+    $on: (event, listener) => ctx.remote.$on(event, listener),
+  }
+  ctx.effect(() => installGitHubUi(shell, remote, { locale }), 'ui-github.install')
 }

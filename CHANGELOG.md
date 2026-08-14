@@ -1,5 +1,9 @@
 # Changelog
 
+## dsh-ui-github 0.1.1 (2026-08-14)
+
+- **Fix: namespace access without inject** — the client half handed `ctx.remote` straight to the React surfaces, so their first `remote.githubConnect` access re-entered the cordis inject check and threw `cannot get property "remote.githubConnect" without inject` (the plugin mounts that namespace itself and must not inject it — ADR-0008). The surfaces now receive a thin face that resolves the namespace per access through inject-free `ctx.get('remote.githubConnect')`, with `$on` still riding the injected gateway service.
+
 ## Unreleased
 
 The dsh client adapter (ADR-0008/ADR-0009), landing the real web-deployment path for `dsh-ui-github`:
