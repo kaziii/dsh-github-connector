@@ -10,6 +10,7 @@ import {
   ConnectGitHubSection,
   MERGE_METHODS,
   PrStatusBar,
+  apply as applyNodeHalf,
   catalogFor,
   connectErrorText,
   connectViewFromStatus,
@@ -932,6 +933,12 @@ describe('installGitHubUi', () => {
 })
 
 // —— invariant companion ——————————————————————————————————————————————————————
+
+describe('node half', () => {
+  it('is empty: the loader entry only anchors the client-module scan (ADR-0008)', () => {
+    expect(applyNodeHalf()).toBeUndefined()
+  })
+})
 
 describe('dsh-ui-github invariant companion', () => {
   it('registers with the invariant service and returns a disposer', async () => {

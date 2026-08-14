@@ -2,7 +2,10 @@
   "extends": "../../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
-    "outDir": "lib/types"
+    "outDir": "lib/types",
+    // The ./client half runs in the browser (dsh client plane); the host-plane
+    // sources under src/ use no DOM globals.
+    "lib": ["es2024", "dom", "dom.iterable"]
   },
   "include": [
     "src"

@@ -6,7 +6,7 @@ The **GitHub connect service** (`ctx.githubConnect`): everything between "the us
 
 1. **Device Flow authorization** (ADR-0001): `startDeviceFlow()` returns the user code immediately and polls in the background at the server's pace (`authorization_pending` continues, `slow_down` adds 5s, `expired_token` / `access_denied` settle terminally). On success the token lands in the **credentials seam** (`credentials.set`) — its `credentials/updated` event is what refreshes every consumer, no restart, and the token value never transits the frontend. v1 uses non-expiring authorization; the refresh-token gap is documented in the code where it will land.
 2. **Deterministic flow-state detection** (ADR-0002): after each `agent/turn-stopping`, cheap git facts (current branch, head sha, ahead count) plus one branch-PR lookup fold into the four-state machine — `hidden` / `pr-ready` / `pr-open` (with CI rollup) / `pr-merged` — pushed over the `github/flow-state` event. Gated hard: non-GitHub remote or unresolvable credential ⇒ no events (unconnected users never see the feature). Turns that produced no new commits emit nothing (noise rule). Detection never throws into the turn.
-3. **`@Remote` button methods** (design §6, zero model turns): `connectStatus()` (cached login lookup), `startDeviceFlow()`, `disconnect()`, `createPr()` (branch/base from git, PR through the seam's idempotent create), `mergePr()` (squash / merge / rebase; 405/409 map to `GITHUB_MERGE_BLOCKED`), `prChecks()` and `refreshFlowState()` for the badge poller — the FRONTEND owns the polling cadence and stops while the page is hidden.
+3. **`@Remote` button methods** (design §6, zero model turns): `connectStatus()` (cached login lookup), `startDeviceFlow()`, `deviceFlowStatus()`, `disconnect()`, `createPr()` (branch/base from git, PR through the seam's idempotent create), `mergePr()` (squash / merge / rebase; 405/409 map to `GITHUB_MERGE_BLOCKED`), `prChecks()` and `refreshFlowState()` for the badge poller — the FRONTEND owns the polling cadence and stops while the page is hidden.
 
 ## Configuration
 
@@ -19,7 +19,9 @@ The **GitHub connect service** (`ctx.githubConnect`): everything between "the us
 | `cwd` / `baseBranch` | process cwd / remote HEAD | Workspace and base overrides. |
 | `scope` | `repo` | OAuth scope requested by the Device Flow. |
 
-## Events
+## Events (host-internal, ADR-0009)
+
+dsh does not forward custom host events to the browser, so both events below serve host-side consumers only; the web UI polls `refreshFlowState` and `deviceFlowStatus` instead. `deviceFlowStatus()` returns the active flow's latest `DeviceFlowUpdate` (updates from a superseded flow are dropped, so a poller never sees a stale terminal phase).
 
 - `github/flow-state` — the status bar's state (four kinds above).
 - `github/device-flow` — `awaiting-authorization` (with the prompt) → `slow-down`* → `authorized` | `expired` | `denied` | `failed`.
