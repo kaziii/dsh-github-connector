@@ -21,7 +21,7 @@ dsh-github-connector：为 [DeepSeek Harness (dsh)](https://github.com/deepseek-
 2. **决策先行**：推翻既有设计决策（认证方式、包结构、seam 语义等）必须先新增 ADR（流程见 [docs/adr/README.md](docs/adr/README.md)），再改 design / plans / 代码。ADR 合并后不可修改，只能被新 ADR 取代。
 3. **按里程碑开工**：实现工作严格跟随 execution-plan 的 M1→M7 顺序与 DoD；完成任务时同步勾选对应 checkbox 并更新文件头部状态行。
 4. **范围纪律**：design §10 列出的"未纳入 v1"内容（PR review、merge queue、GraphQL、token 自动刷新等）不做，除非先出 ADR 变更范围。
-5. **语言**：`docs/` 内中文；根 README 英文为主；提交信息英文。
+5. **语言**：`docs/` 内中文；根 `README.md` 中文为主，英文版在 `README.en.md`；提交信息英文。
 
 ## 工程门槛（代码落地时生效，源自 design §8）
 
