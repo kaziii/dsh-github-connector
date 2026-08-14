@@ -14,20 +14,13 @@
 
 前置条件：Node ≥ 22.19、pnpm、dsh CLI（`npm install -g @deepseek-ai/dsh`）。
 
-包尚未发布到 npm —— 从本仓库安装：
+从 npm 一条命令安装：
 
 ```bash
-git clone https://github.com/kaziii/dsh-github-connector.git
-cd dsh-github-connector && pnpm install && pnpm build
-
-dsh plugin --profile headless add \
-  "$PWD/packages/github/github" \
-  "$PWD/packages/github/github-rest" \
-  "$PWD/packages/github/tool-github" \
-  "$PWD/packages/github/github-connect"
+dsh plugin --profile web add dsh-github dsh-github-rest dsh-tool-github dsh-github-connect
 ```
 
-（把 `headless` 换成你的 profile 名 —— `web`、`tui` 等。）
+（把 `web` 换成你的 profile 名 —— `headless`、`tui` 等。）
 
 然后连接账号：打开 **dsh 设置 → Connect GitHub** 走 Device Flow；CLI / headless 场景则设置 `GITHUB_TOKEN` 环境变量（带 `repo` 权限的 personal access token）。
 

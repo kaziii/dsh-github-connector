@@ -14,20 +14,13 @@ Docs (中文): [documentation index](docs/README.md) · [architecture](docs/desi
 
 Prerequisites: Node ≥ 22.19, pnpm, and the dsh CLI (`npm install -g @deepseek-ai/dsh`).
 
-The packages are not on npm yet — install from this repository:
+Install from npm — one command:
 
 ```bash
-git clone https://github.com/kaziii/dsh-github-connector.git
-cd dsh-github-connector && pnpm install && pnpm build
-
-dsh plugin --profile headless add \
-  "$PWD/packages/github/github" \
-  "$PWD/packages/github/github-rest" \
-  "$PWD/packages/github/tool-github" \
-  "$PWD/packages/github/github-connect"
+dsh plugin --profile web add dsh-github dsh-github-rest dsh-tool-github dsh-github-connect
 ```
 
-(Substitute your profile name — `web`, `tui`, … — for `headless`.)
+(Substitute your profile name — `headless`, `tui`, … — for `web`.)
 
 Then connect your account: open **dsh Settings → Connect GitHub** and follow the Device Flow, or set the `GITHUB_TOKEN` environment variable (a personal access token with `repo` scope) for CLI / headless use.
 
