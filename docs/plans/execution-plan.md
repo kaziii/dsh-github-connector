@@ -1,6 +1,6 @@
 # dsh GitHub 连接器 — 执行计划
 
-> 状态：执行中——M1–M6 已完成（seam、REST provider、读写六工具 + 审批门、`dsh-github-connect` Device Flow 与 flow-state、`dsh-ui-github` 设置区块 + PR 状态条，客户端外壳经注入端口对接见 [ADR-0007](../adr/0007-ui-binds-client-shell-via-port.md)；M3/M6 的手工验收项待有 dsh 宿主环境后补），当前推进 M7。依据 [design.md](../design/design.md)（设计定稿）拆解为可直接开工的里程碑与任务清单。设计取舍的理由见 [ADR](../adr/README.md)。
+> 状态：M1–M7 全部完成（v1 已实现，见根 [CHANGELOG.md](../../CHANGELOG.md)）。仅剩两项依赖 dsh 宿主环境的手工验收挂起：M3 的 CLI 走查与 M6 的端到端 UI 脚本（后者已写入 [PR #5](https://github.com/kaziii/dsh-github-connector/pull/5) 描述；客户端外壳对接方式见 [ADR-0007](../adr/0007-ui-binds-client-shell-via-port.md)）。依据 [design.md](../design/design.md) 拆解为可直接开工的里程碑与任务清单，设计取舍的理由见 [ADR](../adr/README.md)。
 > 原则：每个里程碑结束时**产物独立可用、可测、可合并**；严格按依赖顺序推进，不并行开新面。
 
 ## 0. 总览
@@ -168,11 +168,11 @@ M5 可与 M3/M4 并行（如有人力），但默认串行推进。
 
 ## M7 — 收尾与发布
 
-1. `scripts/gen-tool-catalog.ts` boot manifest 登记（工具包硬性门槛）。
-2. 双语 README（每包，含 `## Model Experience` 定型章节）+ i18n 校对。
-3. examples 叶子：最小可运行示例（CLI + token 路径 / 完整 UI 路径）。
-4. 文档 gate 全绿；全仓 lint / typecheck / coverage 复查。
-5. 发布清单：版本号、changelog、design.md 状态从"未开工"更新为"已实现（v1）"。
+1. [x] `scripts/gen-tool-catalog.ts` boot manifest 登记（工具包硬性门槛）：脚本按 config 变体（default / read-only）真实组合并快照全部注册工具到 `tool-catalog.json`；`pnpm gen:catalog` 再生，`pnpm gate:catalog` 漂移即失败。
+2. [x] 双语 README（每包，含 `## Model Experience` 定型章节）+ i18n 校对：五包三件套齐全，i18n 哈希记录与当前 blob 一致。
+3. [x] examples 叶子：`examples/github-quickstart`——CLI + token 路径真实可跑（seam 直调、`ctx.tools.execute`、宿主仓库上的 flow-state 检测；keyless 优雅降级），完整 UI 路径以编译校验的接线形态给出（`ui-wiring.ts`，ADR-0007）。配套新增 `pnpm build`（tsc -b + 入口 shim），使脚本与示例经 `lib/` 真实解析各包。
+4. [x] 文档 gate 全绿；全仓 typecheck / coverage 复查（仓库未配置独立 lint 工具，以 tsc 严格模式为准——`noUnused*`、`strict` 全开）。
+5. [x] 发布清单：全包版本 `0.1.0`、根 `CHANGELOG.md`、design.md 状态更新为"已实现（v1）"、AGENTS.md 项目状态同步。
 
 ---
 
