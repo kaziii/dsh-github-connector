@@ -24,7 +24,8 @@
   },
   "files": [
     "lib",
-    "src"
+    "src",
+    "cordis.patch.yml"
   ],
   "license": "MIT",
   "peerDependencies": {
@@ -44,5 +45,10 @@
     "@deepseek-ai/dsh-llm": "^0.0.1-rc.1",
     "@deepseek-ai/dsh-settings": "^0.0.1-rc.1",
     "dsh-github": "workspace:*"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
   }
 }

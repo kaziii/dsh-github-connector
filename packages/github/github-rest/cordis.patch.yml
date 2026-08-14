@@ -1,0 +1,8 @@
+# The dsh-github-rest bundle patch: mount the REST provider into `ctx.github`.
+# One insert; row order carries no load semantics (activation is
+# service-availability driven), so installing the connector packages in any
+# order composes the same host.
+
+- insert:
+    - id: github-rest
+      name: dsh-github-rest

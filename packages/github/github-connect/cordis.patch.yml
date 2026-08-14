@@ -1,0 +1,8 @@
+# The dsh-github-connect bundle patch: mount Device Flow connect, flow-state detection, and the @Remote button methods.
+# One insert; row order carries no load semantics (activation is
+# service-availability driven), so installing the connector packages in any
+# order composes the same host.
+
+- insert:
+    - id: github-connect
+      name: dsh-github-connect
