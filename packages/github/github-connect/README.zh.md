@@ -16,7 +16,7 @@
 | `credentialRef` | `GITHUB_TOKEN` | token 的存取位置（凭据 seam，env 回退）。 |
 | `apiBaseURL` / `authBaseURL` | github.com 端点 | GHES：`apiBaseURL` 指向 `/api/v3`，`authBaseURL` 指向 GHES 主机。 |
 | `host` | `github.com` | 工作区 remote 必须指向的主机，flow-state 的激活门槛。 |
-| `cwd` / `baseBranch` | 进程 cwd / remote HEAD | 工作区与 base 覆盖。 |
+| `cwd` / `baseBranch` | 发起会话的工作区，否则进程 cwd / remote HEAD | `cwd` 强制所有 git 检查落在同一目录（ADR-0010：正常情况由发起会话的 `header.cwd` 决定）；`baseBranch` 覆盖检测出的 base。 |
 | `scope` | `repo` | Device Flow 请求的 OAuth scope。 |
 
 ## 事件（宿主内部，ADR-0009）

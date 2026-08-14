@@ -18,6 +18,8 @@ export interface GitHubUiOptions {
   /** Flow-state poll pacing (ADR-0009), independent of the CI badge's. */
   readonly flowPoll?: PollPolicy
   readonly collapseMs?: number
+  /** Loading cap of the agent-driven [Create PR] (ADR-0011). */
+  readonly createTimeoutMs?: number
   readonly timers?: StatusBarTimers
 }
 
@@ -42,6 +44,7 @@ export function installGitHubUi(shell: GitHubUiShell, remote: GitHubUiRemote, op
       ...options.poll === undefined ? {} : { poll: options.poll },
       ...options.flowPoll === undefined ? {} : { flowPoll: options.flowPoll },
       ...options.collapseMs === undefined ? {} : { collapseMs: options.collapseMs },
+      ...options.createTimeoutMs === undefined ? {} : { createTimeoutMs: options.createTimeoutMs },
     }))
   return () => {
     offSection()

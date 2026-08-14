@@ -152,6 +152,42 @@ describe('GITHUB_CONNECT_REMOTE', () => {
     expect(prNumber(5)).toBe(5)
     expect(() => prNumber('5')).toThrow(TypeError)
   })
+
+  it('carries the calling session on every git-touching request (ADR-0010)', () => {
+    // The zero-business-argument methods took an optional session request.
+    for (const method of ['prDraft', 'refreshFlowState'] as const) {
+      const parameter = descriptor(method).parameters[0]!
+      expect(parameter.wire).toBe('request')
+      expect(parameter.acceptsUndefined).toBe(true)
+      const parse = parseOf(parameter.codec)
+      expect(parse(undefined)).toBeUndefined()
+      expect(parse(null)).toBeUndefined()
+      const bare = {}
+      expect(parse(bare)).toBe(bare)
+      const carried = { sessionId: 's1' }
+      expect(parse(carried)).toBe(carried)
+      expect(() => parse({ sessionId: 5 })).toThrow(TypeError)
+      expect(() => parse('s1')).toThrow(TypeError)
+    }
+
+    // The button requests validate a present sessionId's shape only.
+    const createPr = parseOf(descriptor('createPr').parameters[0]!.codec)
+    expect(createPr({ title: 'feat: x', sessionId: 's1' })).toEqual({ title: 'feat: x', sessionId: 's1' })
+    expect(() => createPr({ title: 'feat: x', sessionId: 5 })).toThrow(TypeError)
+    const mergePr = parseOf(descriptor('mergePr').parameters[0]!.codec)
+    expect(mergePr({ number: 1, method: 'squash', sessionId: 's1' })).toEqual({ number: 1, method: 'squash', sessionId: 's1' })
+    expect(() => mergePr({ number: 1, method: 'squash', sessionId: 5 })).toThrow(TypeError)
+
+    // prChecks grew a second, optional session parameter.
+    const session = descriptor('prChecks').parameters[1]!
+    expect(session.wire).toBe('sessionId')
+    expect(session.acceptsUndefined).toBe(true)
+    const parse = parseOf(session.codec)
+    expect(parse(undefined)).toBeUndefined()
+    expect(parse(null)).toBeUndefined()
+    expect(parse('s1')).toBe('s1')
+    expect(() => parse(5)).toThrow(TypeError)
+  })
 })
 
 // —— browser shell ————————————————————————————————————————————————————————————
@@ -176,13 +212,17 @@ describe('createBrowserShell', () => {
     shell.registerSlot('conversation.input.dock', () => 'dock')
     shell.prompt('too early')
     expect(suite.sends).toEqual([])
+    expect(shell.sessionId()).toBeUndefined()
     suite.registrations[0]!.component({ sessionId: 's1' })
     shell.prompt('review PR #1')
     expect(suite.sends).toEqual([{ sessionId: 's1', text: 'review PR #1' }])
+    // The same rendered-for session rides the Remote calls (ADR-0010).
+    expect(shell.sessionId()).toBe('s1')
     // A sessionless render (root-scope pass) keeps the last session.
     suite.registrations[0]!.component({})
     shell.prompt('again')
     expect(suite.sends).toHaveLength(2)
+    expect(shell.sessionId()).toBe('s1')
   })
 
   it('disposes a slot registration through the returned disposer', () => {

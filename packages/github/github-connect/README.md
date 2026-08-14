@@ -16,7 +16,7 @@ The **GitHub connect service** (`ctx.githubConnect`): everything between "the us
 | `credentialRef` | `GITHUB_TOKEN` | Where the token is stored and resolved (credentials seam, env fallback). |
 | `apiBaseURL` / `authBaseURL` | github.com endpoints | GHES: point `apiBaseURL` at `/api/v3`, `authBaseURL` at the GHES host. |
 | `host` | `github.com` | The host a workspace remote must point at to activate flow-state. |
-| `cwd` / `baseBranch` | process cwd / remote HEAD | Workspace and base overrides. |
+| `cwd` / `baseBranch` | calling session’s workspace, else process cwd / remote HEAD | `cwd` forces every git check into one directory (ADR-0010: normally the calling session’s `header.cwd` decides); `baseBranch` overrides the detected base. |
 | `scope` | `repo` | OAuth scope requested by the Device Flow. |
 
 ## Events (host-internal, ADR-0009)

@@ -110,6 +110,7 @@ interface FakeShell {
   readonly slots: Map<string, () => ReactNode>
   setVisible(visible: boolean): void
   setConfirm(answer: boolean): void
+  setSessionId(id: string | undefined): void
 }
 
 function fakeShell(): FakeShell {
@@ -121,11 +122,13 @@ function fakeShell(): FakeShell {
   const visibilityListeners = new Set<(visible: boolean) => void>()
   let visible = true
   let confirmAnswer = true
+  let sessionId: string | undefined = 'session-1'
   const shell: GitHubUiShell = {
     registerSlot: (slot, render) => {
       slots.set(slot, render)
       return () => void slots.delete(slot)
     },
+    sessionId: () => sessionId,
     prompt: text => void prompts.push(text),
     openExternal: url => void opened.push(url),
     copyText: async text => void copied.push(text),
@@ -153,6 +156,7 @@ function fakeShell(): FakeShell {
       for (const listener of visibilityListeners) listener(next)
     },
     setConfirm: answer => void (confirmAnswer = answer),
+    setSessionId: id => void (sessionId = id),
   }
 }
 
@@ -280,10 +284,11 @@ describe('catalogs', () => {
       expect(catalog.aheadOfBase('feat/x', 'main', 1)).toContain('feat/x')
       expect(catalog.aheadOfBase('feat/x', 'main', 3)).toContain('3')
       expect(catalog.createPrButton).not.toBe('')
-      expect(catalog.prTitlePlaceholder).not.toBe('')
-      expect(catalog.prBodyPlaceholder).not.toBe('')
-      expect(catalog.draftGenerating).not.toBe('')
-      expect(catalog.confirmCreateButton).not.toBe('')
+      expect(catalog.creatingButton).not.toBe('')
+      expect(catalog.createPrompt('feat/x', 'main')).toContain('feat/x')
+      expect(catalog.createPrompt('feat/x', 'main')).toContain('main')
+      expect(catalog.createTimedOut).not.toBe('')
+      expect(catalog.dismissLabel).not.toBe('')
       expect(catalog.connectDescription).not.toBe('')
       expect(catalog.waitingHint).not.toBe('')
       expect(catalog.openAuthPage).not.toBe('')
@@ -531,6 +536,7 @@ interface BarOptions {
   poll?: { initialMs: number, maxMs: number }
   flowPoll?: { initialMs: number, maxMs: number }
   collapseMs?: number
+  createTimeoutMs?: number
   timers?: StatusBarTimers
 }
 
@@ -549,7 +555,10 @@ describe('PrStatusBar', () => {
     expect(container.textContent).toBe('')
 
     await adoptState(suite, PR_READY)
-    expect(container.textContent).toContain('feat/x is ahead of main by 3 commits')
+    expect(container.textContent).toContain('hello-world')
+    expect(container.textContent).toContain('feat/x')
+    // The ahead summary survives as the chip's tooltip.
+    expect(container.querySelector('.gh-repo')!.getAttribute('title')).toBe('feat/x is ahead of main by 3 commits')
 
     await adoptState(suite, PR_OPEN)
     expect(container.querySelector('a')!.getAttribute('href')).toBe(PR_OPEN.kind === 'pr-open' ? PR_OPEN.url : '')
@@ -573,10 +582,10 @@ describe('PrStatusBar', () => {
     const suite = fakeRemote()
     suite.calls.refreshFlowState.mockResolvedValue(ok(PR_READY))
     const container = await mount(bar(suite, fakeShell(), { timers: manualTimers().timers }))
-    expect(container.textContent).toContain('feat/x is ahead of main by 3 commits')
+    expect(container.textContent).toContain('feat/x')
   })
 
-  it('creates a PR from the edited form and adopts the refreshed state', async () => {
+  it('hands [Create PR] to the agent and holds loading until the state transitions (ADR-0011)', async () => {
     const suite = fakeRemote()
     const shell = fakeShell()
     const clock = manualTimers()
@@ -584,88 +593,72 @@ describe('PrStatusBar', () => {
     await adoptState(suite, PR_READY)
 
     await click(buttonByText(container, 'Create PR'))
-    await click(buttonByText(container, 'Create PR'))
-    expect(container.querySelector('input')).toBeNull()
-    await click(buttonByText(container, 'Create PR'))
-    // Reopening never refetches the draft for the same branch.
-    expect(suite.calls.prDraft).toHaveBeenCalledTimes(1)
-    await setValue(container.querySelector('input')!, 'feat: add x')
-    await setValue(container.querySelector('textarea')!, 'Adds x end to end.')
+    expect(shell.prompts).toEqual([catalogFor('en').createPrompt('feat/x', 'main')])
+    expect((buttonByText(container, 'Creating PR…') as HTMLButtonElement).disabled).toBe(true)
+    // The Remote button methods stay untouched: the agent turn owns the creation.
+    expect(suite.calls.createPr).not.toHaveBeenCalled()
+    expect(suite.calls.prDraft).not.toHaveBeenCalled()
+
+    // An unchanged fast poll keeps the loading state …
+    await clock.fire()
+    expect((buttonByText(container, 'Creating PR…') as HTMLButtonElement).disabled).toBe(true)
+
+    // … and the pr-open transition ends it.
     suite.calls.refreshFlowState.mockResolvedValue(ok(PR_OPEN))
-    await click(buttonByText(container, 'Create pull request'))
-    expect(suite.calls.createPr).toHaveBeenCalledWith({ title: 'feat: add x', body: 'Adds x end to end.' })
+    await clock.fire()
     expect(container.textContent).toContain('#123')
   })
 
-  it('prefills the form from the host draft (design §6)', async () => {
+  it('restores the button and points at the conversation when creation times out', async () => {
     const suite = fakeRemote()
+    const shell = fakeShell()
     const clock = manualTimers()
-    const container = await mount(bar(suite, fakeShell(), { poll: { initialMs: 10, maxMs: 40 }, timers: clock.timers }))
-    await adoptState(suite, PR_READY)
-    await click(buttonByText(container, 'Create PR'))
-    expect(container.querySelector('input')!.value).toBe('feat: draft title')
-    expect(container.querySelector('textarea')!.value).toBe('Draft body.')
-    await click(buttonByText(container, 'Create pull request'))
-    expect(suite.calls.createPr).toHaveBeenCalledWith({ title: 'feat: draft title', body: 'Draft body.' })
-  })
-
-  it('disables the form while drafting and tolerates a bodyless draft', async () => {
-    const suite = fakeRemote()
-    let resolveDraft: (value: RemoteResult<unknown>) => void = () => {}
-    suite.calls.prDraft.mockImplementation(() => new Promise(resolve => {
-      resolveDraft = resolve
+    const container = await mount(bar(suite, shell, {
+      poll: { initialMs: 100, maxMs: 100 },
+      createTimeoutMs: 50,
+      timers: clock.timers,
     }))
-    const clock = manualTimers()
-    const container = await mount(bar(suite, fakeShell(), { poll: { initialMs: 10, maxMs: 40 }, timers: clock.timers }))
     await adoptState(suite, PR_READY)
     await click(buttonByText(container, 'Create PR'))
-    const input = container.querySelector('input')!
-    expect(input.disabled).toBe(true)
-    expect(input.placeholder).toBe(catalogFor('en').draftGenerating)
-    await act(async () => {
-      resolveDraft(ok({ title: 'feat: solo commit' }))
-      await new Promise(resolve => setTimeout(resolve, 0))
-    })
-    expect(input.disabled).toBe(false)
-    expect(input.value).toBe('feat: solo commit')
-    expect(container.querySelector('textarea')!.value).toBe('')
+    // Pending: the fast poll (100 ms) and the timeout (50 ms) — the timeout wins.
+    await clock.fire()
+    expect(container.textContent).toContain(catalogFor('en').createTimedOut)
+    expect((buttonByText(container, 'Create PR') as HTMLButtonElement).disabled).toBe(false)
+    expect(shell.prompts).toHaveLength(1)
   })
 
-  it('falls back to the branch name as the title when the draft fails', async () => {
+  it('dismisses on × until the flow state changes', async () => {
     const suite = fakeRemote()
-    suite.calls.prDraft.mockResolvedValue(failed('no commits'))
+    const shell = fakeShell()
     const clock = manualTimers()
-    const container = await mount(bar(suite, fakeShell(), { poll: { initialMs: 10, maxMs: 40 }, timers: clock.timers }))
+    const container = await mount(bar(suite, shell, { poll: { initialMs: 10, maxMs: 40 }, timers: clock.timers }))
     await adoptState(suite, PR_READY)
-    await click(buttonByText(container, 'Create PR'))
-    await click(buttonByText(container, 'Create pull request'))
-    expect(suite.calls.createPr).toHaveBeenCalledWith({ title: 'feat/x' })
+    await click(buttonByText(container, '×'))
+    expect(container.textContent).toBe('')
+    // The same polled state stays dismissed …
+    await adoptState(suite, PR_READY)
+    expect(container.textContent).toBe('')
+    // … and a real transition clears the dismissal.
+    await adoptState(suite, PR_OPEN)
+    expect(container.textContent).toContain('#123')
   })
 
-  it('shows a creation refusal in place and keeps the bar interactive', async () => {
+  it('renders the diff-stat pill only when the host reports one', async () => {
     const suite = fakeRemote()
-    suite.calls.createPr.mockResolvedValue(failed('validation failed'))
     const clock = manualTimers()
     const container = await mount(bar(suite, fakeShell(), { poll: { initialMs: 10, maxMs: 40 }, timers: clock.timers }))
     await adoptState(suite, PR_READY)
-    await click(buttonByText(container, 'Create PR'))
-    await click(buttonByText(container, 'Create pull request'))
-    expect(container.textContent).toContain('validation failed')
-    expect(container.textContent).toContain('feat/x is ahead of main')
-  })
+    expect(container.querySelector('.gh-diff')).toBeNull()
 
-  it('keeps the current state when the post-create refresh fails', async () => {
-    const suite = fakeRemote()
-    suite.calls.refreshFlowState
-      .mockResolvedValueOnce(ok({ kind: 'hidden' }))
-      .mockResolvedValue(failed('gateway down'))
-    const clock = manualTimers()
-    const container = await mount(bar(suite, fakeShell(), { poll: { initialMs: 10, maxMs: 40 }, timers: clock.timers }))
-    await adoptState(suite, PR_READY)
-    await click(buttonByText(container, 'Create PR'))
-    await click(buttonByText(container, 'Create pull request'))
-    expect(suite.calls.createPr).toHaveBeenCalledTimes(1)
-    expect(container.textContent).toContain('feat/x is ahead of main')
+    await adoptState(suite, { ...PR_READY, additions: 329, deletions: 76 })
+    expect(container.querySelector('.gh-add')!.textContent).toBe('+329')
+    expect(container.querySelector('.gh-del')!.textContent).toBe('-76')
+
+    // One-sided stats fall back to 0 on the other side.
+    await adoptState(suite, { ...PR_READY, deletions: 5 })
+    expect(container.querySelector('.gh-add')!.textContent).toBe('+0')
+    await adoptState(suite, { ...PR_READY, additions: 7 })
+    expect(container.querySelector('.gh-del')!.textContent).toBe('-0')
   })
 
   it('renders a plain PR label and no external link without a URL', async () => {
@@ -771,7 +764,7 @@ describe('PrStatusBar', () => {
     await click(buttonByText(container, 'Merge'))
     await click(buttonByText(container, 'Squash'))
     expect(shell.confirms.at(-1)).toContain('#123')
-    expect(suite.calls.mergePr).toHaveBeenCalledWith({ number: 123, method: 'squash' })
+    expect(suite.calls.mergePr).toHaveBeenCalledWith({ number: 123, method: 'squash', sessionId: 'session-1' })
     expect(container.textContent).toContain('#123 merged')
   })
 
@@ -813,7 +806,7 @@ describe('PrStatusBar', () => {
     const clock = manualTimers()
     const container = await mount(bar(suite, fakeShell(), { locale: 'zh-CN', poll: { initialMs: 10, maxMs: 40 }, timers: clock.timers }))
     await adoptState(suite, PR_READY)
-    expect(container.textContent).toContain('feat/x 领先 main 3 个提交')
+    expect(container.querySelector('.gh-repo')!.getAttribute('title')).toBe('feat/x 领先 main 3 个提交')
     expect(container.textContent).toContain('创建 PR')
   })
 
@@ -851,13 +844,13 @@ describe('PrStatusBar', () => {
 
     suite.calls.refreshFlowState.mockResolvedValue(ok(PR_READY))
     await clock.fire()
-    expect(container.textContent).toContain('feat/x is ahead of main by 3 commits')
+    expect(container.textContent).toContain('feat/x')
     await clock.fire()
     await clock.fire()
     expect(clock.delays).toEqual([100, 200, 400, 400])
   })
 
-  it('keeps an open draft on an unchanged poll and folds a CI change into the badge', async () => {
+  it('keeps the merge menu open on an unchanged poll and folds a CI change into the badge', async () => {
     const suite = fakeRemote()
     const clock = manualTimers()
     const container = await mount(bar(suite, fakeShell(), {
@@ -865,19 +858,17 @@ describe('PrStatusBar', () => {
       poll: IDLE_POLL,
       timers: clock.timers,
     }))
-    suite.calls.refreshFlowState.mockResolvedValue(ok(PR_READY))
-    await clock.fire()
-    await click(buttonByText(container, 'Create PR'))
-    await setValue(container.querySelector('input')!, 'feat: draft in progress')
-
-    // Same state again: the dropdown and the draft survive the poll.
-    await clock.fire()
-    expect(container.querySelector('input')!.value).toBe('feat: draft in progress')
-
     suite.calls.refreshFlowState.mockResolvedValue(ok(PR_OPEN_BARE))
     await clock.fire()
     expect(container.textContent).toContain('#123')
     expect(container.textContent).not.toContain('CI')
+    await click(buttonByText(container, 'Merge'))
+    const menuItems = () => [...container.querySelectorAll('button')].map(button => button.textContent)
+    expect(menuItems()).toContain('Squash')
+
+    // Same state again: the dropdown survives the poll.
+    await clock.fire()
+    expect(menuItems()).toContain('Squash')
 
     // Unchanged pr-open with no rollup leaves the badge alone …
     await clock.fire()
@@ -929,7 +920,7 @@ describe('PrStatusBar', () => {
     // A real transition clears the memory …
     suite.calls.refreshFlowState.mockResolvedValue(ok(PR_READY))
     await clock.fire()
-    expect(container.textContent).toContain('feat/x is ahead')
+    expect(container.textContent).toContain('feat/x')
     // … so a DIFFERENT merge shows its banner again.
     suite.calls.refreshFlowState.mockResolvedValue(ok({ ...PR_MERGED, number: 124 }))
     await clock.fire()
@@ -966,6 +957,7 @@ describe('installGitHubUi', () => {
       poll: { initialMs: 10, maxMs: 40 },
       flowPoll: IDLE_POLL,
       collapseMs: 100,
+      createTimeoutMs: 60_000,
       timers: clock.timers,
     })
     const sectionContainer = await mount(shell.slots.get('settings.section')!() as ReactElement)

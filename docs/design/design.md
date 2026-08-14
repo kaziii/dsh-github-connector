@@ -9,7 +9,7 @@
 
 1. **一键连接**：设置页点击 "Connect GitHub" → 浏览器打开 GitHub Device Flow 授权页 → 授权完成后 dsh 显示"已连接 @用户名"。全程不接触 token 明文、不编辑配置文件。
 2. **对话内 PR 工作流**：agent 完成阶段性工作（有新提交）后，输入框上方自动出现状态条：
-   - **阶段 1**（分支领先 base，无 PR）：`feat/xxx 领先 master 3 个提交` + [创建 PR ▾]
+   - **阶段 1**（分支领先 base，无 PR）：`repo feat/xxx +N −M` 紧凑胶囊条 + [创建 PR]（单击派发 agent 创建并 loading，ADR-0011）+ [×]（收起至状态变化）
    - **阶段 2**（PR 已开）：`#123 · CI 通过` + [AI 审查] [Merge ▾]（squash / merge commit / rebase / 在 GitHub 打开）
    - **阶段 3**（已合并）：`#123 已合并到 master`，短暂确认后收起
 3. **模型侧工具**：搜索、读 issue/PR（diff 带 token 预算）、建 issue/评论/PR，写操作走 dsh 现有审批流。
@@ -76,7 +76,7 @@ CLI/headless 路径保持可用：直接配 `GITHUB_TOKEN` 环境变量或 `.cre
 
 | 按钮 | 通路 | 是否消耗模型回合 |
 |---|---|---|
-| 创建 PR | `ctx.remote.github.createPr`（标题/描述由宿主用会话上下文预填，可编辑确认） | 否 |
+| 创建 PR | `sessions.prompt("创建 PR …")`，模型经 GitHub 工具归纳标题/描述并创建（ADR-0011；`createPr`/`prDraft` @Remote 保留供集成方） | 是（有意取舍） |
 | Merge | `ctx.remote.github.mergePr`，接现有审批面板做不可逆确认 | 否 |
 | AI 审查 | `sessions.prompt("审查 PR #N …")`，正常 agent 回合 | 是（这正是目的） |
 

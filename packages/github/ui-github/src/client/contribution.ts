@@ -80,6 +80,24 @@ const REQUEST: Omit<InvocationParameterDescriptor, 'codec'> = {
   source: 'json',
 }
 
+/** Reject a present-but-non-string `sessionId` field (ADR-0010); absence is fine. */
+function requireSessionIdShape(label: string, request: { sessionId?: unknown }): void {
+  if (request.sessionId !== undefined && typeof request.sessionId !== 'string') {
+    throw new TypeError(`${label} sessionId must be a string when present`)
+  }
+}
+
+/** The optional session-carrier request of the zero-business-argument methods (ADR-0010). */
+const SESSION_REQUEST: InvocationParameterDescriptor = {
+  ...REQUEST,
+  acceptsUndefined: true,
+  codec: strict('dsh-ui-github#SessionRequest?', value => {
+    const request = parseMaybeObject('the session request')(value) as { sessionId?: unknown } | undefined
+    if (request !== undefined) requireSessionIdShape('the session request', request)
+    return request
+  }),
+}
+
 /** The `githubConnect` Remote face (mirrors `GitHubConnectService`'s @Remote methods). */
 export const GITHUB_CONNECT_REMOTE: TypertRemoteContribution = {
   package: OWNER,
@@ -88,7 +106,7 @@ export const GITHUB_CONNECT_REMOTE: TypertRemoteContribution = {
     query('startDeviceFlow', strict('dsh-github-connect#DeviceFlowPrompt', parseObject('the device flow prompt'))),
     query('deviceFlowStatus', strict('dsh-github-connect#DeviceFlowUpdate?', parseMaybeObject('the device flow update'))),
     query('disconnect', strict('dsh-ui-github#Void', parseVoid)),
-    query('prDraft', strict('dsh-github-connect#PrDraft', value => {
+    command('prDraft', SESSION_REQUEST, strict('dsh-github-connect#PrDraft', value => {
       const draft = parseObject('the PR draft')(value) as { title?: unknown }
       if (typeof draft.title !== 'string') throw new TypeError('the PR draft needs a string title')
       return draft
@@ -98,8 +116,9 @@ export const GITHUB_CONNECT_REMOTE: TypertRemoteContribution = {
       {
         ...REQUEST,
         codec: strict('dsh-github-connect#CreatePrRequest', value => {
-          const request = parseObject('the createPr request')(value) as { title?: unknown }
+          const request = parseObject('the createPr request')(value) as { title?: unknown, sessionId?: unknown }
           if (typeof request.title !== 'string') throw new TypeError('createPr needs a string title')
+          requireSessionIdShape('the createPr request', request)
           return request
         }),
       },
@@ -110,33 +129,46 @@ export const GITHUB_CONNECT_REMOTE: TypertRemoteContribution = {
       {
         ...REQUEST,
         codec: strict('dsh-github-connect#MergePrRequest', value => {
-          const request = parseObject('the mergePr request')(value) as { number?: unknown, method?: unknown }
+          const request = parseObject('the mergePr request')(value) as { number?: unknown, method?: unknown, sessionId?: unknown }
           if (typeof request.number !== 'number') throw new TypeError('mergePr needs a numeric PR number')
           if (typeof request.method !== 'string') throw new TypeError('mergePr needs a merge method')
+          requireSessionIdShape('the mergePr request', request)
           return request
         }),
       },
       strict('dsh-github-connect#MergePrResult', parseObject('the mergePr result')),
     ),
-    command(
-      'prChecks',
-      {
-        name: 'number',
-        wire: 'number',
-        source: 'json',
-        codec: strict('dsh-ui-github#PrNumber', value => {
-          if (typeof value !== 'number') throw new TypeError('prChecks needs a numeric PR number')
-          return value
-        }),
-      },
-      strict('dsh-github-connect#ChecksSummary?', value =>
+    {
+      ...query('prChecks', strict('dsh-github-connect#ChecksSummary?', value =>
         value === undefined || value === null
           ? undefined
           : (() => {
               if (typeof value !== 'string') throw new TypeError('the checks summary must be a string')
               return value
-            })()),
-    ),
-    query('refreshFlowState', strict('dsh-github-connect#GitHubFlowState', parseObject('the flow state'))),
+            })())),
+      parameters: [
+        {
+          name: 'number',
+          wire: 'number',
+          source: 'json',
+          codec: strict('dsh-ui-github#PrNumber', value => {
+            if (typeof value !== 'number') throw new TypeError('prChecks needs a numeric PR number')
+            return value
+          }),
+        },
+        {
+          name: 'sessionId',
+          wire: 'sessionId',
+          source: 'json',
+          acceptsUndefined: true,
+          codec: strict('dsh-ui-github#SessionId?', value => {
+            if (value === undefined || value === null) return undefined
+            if (typeof value !== 'string') throw new TypeError('prChecks sessionId must be a string when present')
+            return value
+          }),
+        },
+      ],
+    },
+    command('refreshFlowState', SESSION_REQUEST, strict('dsh-github-connect#GitHubFlowState', parseObject('the flow state'))),
   ],
 }

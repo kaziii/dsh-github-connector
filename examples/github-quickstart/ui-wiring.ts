@@ -20,6 +20,8 @@ import type { ReactNode } from 'react'
 export interface WebClientFacilities {
   /** The client slot registry (`settings.section` / `conversation.input.dock`). */
   registerSlot(slot: GitHubUiSlotId, render: () => ReactNode): () => void
+  /** The session the conversation dock renders for (ADR-0010). */
+  currentSessionId(): string | undefined
   /** `sessions.prompt` — the [AI review] button's model turn. */
   sendPrompt(text: string): void
   /** The host approval surface reused for the irreversible Merge confirmation. */
@@ -36,6 +38,7 @@ export interface WebClientFacilities {
 export function wireGitHubUi(remote: GitHubUiRemote, facilities: WebClientFacilities): () => void {
   const shell: GitHubUiShell = {
     registerSlot: (slot, render) => facilities.registerSlot(slot, render),
+    sessionId: () => facilities.currentSessionId(),
     prompt: text => facilities.sendPrompt(text),
     openExternal: url => void window.open(url, '_blank', 'noopener'),
     copyText: text => navigator.clipboard.writeText(text),

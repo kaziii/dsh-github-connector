@@ -19,19 +19,48 @@ export const STYLE_TEXT = `
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
-  margin: 0 0 6px;
-  padding: 6px 12px;
+  gap: 10px;
+  box-sizing: border-box;
+  width: 100%;
+  /* Claude-Code-style chip: hug the conversation column, not the window. */
+  max-width: var(--dsh-conversation-width, 760px);
+  margin: 0 auto 8px;
+  padding: 8px 14px;
   font-size: var(--dsh-font-size-sm, 12.5px);
   line-height: 1.6;
   color: var(--dsh-text, inherit);
   background: var(--dsh-bg-elevated, rgba(127, 127, 127, 0.07));
   border: 1px solid var(--dsh-border, rgba(127, 127, 127, 0.22));
-  border-radius: var(--dsh-radius-lg, 10px);
+  border-radius: var(--dsh-radius-lg, 12px);
 }
 .gh-flow-text { font-weight: 500; }
 .gh-merged { color: var(--dsh-color-success, #1a7f37); }
 .gh-spacer { flex: 1; }
+.gh-repo { font-weight: 600; }
+.gh-branch { opacity: 0.7; }
+.gh-diff {
+  display: inline-flex;
+  gap: 6px;
+  padding: 1px 9px;
+  font-size: var(--dsh-font-size-xs, 11.5px);
+  background: var(--dsh-bg-popover, Canvas);
+  border: 1px solid var(--dsh-border, rgba(127, 127, 127, 0.22));
+  border-radius: 999px;
+}
+.gh-add { color: var(--dsh-color-success, #1a7f37); font-weight: 600; }
+.gh-del { color: var(--dsh-color-danger, #cf222e); font-weight: 600; }
+.gh-close {
+  appearance: none;
+  font: inherit;
+  padding: 1px 6px;
+  color: inherit;
+  opacity: 0.55;
+  background: transparent;
+  border: none;
+  border-radius: var(--dsh-radius-md, 6px);
+  cursor: pointer;
+}
+.gh-close:hover { opacity: 1; background: rgba(127, 127, 127, 0.12); }
 .gh-pr-link {
   font-weight: 600;
   color: var(--dsh-primary, #4d6bfe);
@@ -53,12 +82,6 @@ export const STYLE_TEXT = `
 }
 .gh-btn:hover { background: rgba(127, 127, 127, 0.12); }
 .gh-btn:disabled { opacity: 0.5; cursor: default; }
-.gh-btn-primary {
-  color: #fff;
-  background: var(--dsh-primary, #4d6bfe);
-  border-color: transparent;
-}
-.gh-btn-primary:hover { background: var(--dsh-primary, #4d6bfe); filter: brightness(1.08); }
 
 .gh-menu {
   position: absolute;
@@ -73,9 +96,7 @@ export const STYLE_TEXT = `
   border-radius: var(--dsh-radius-lg, 10px);
   box-shadow: var(--dsh-shadow-popover, 0 8px 24px rgba(0, 0, 0, 0.12));
 }
-.gh-create-menu { gap: 8px; padding: 10px; width: min(340px, 80vw); }
 .gh-merge-menu { gap: 2px; padding: 4px; min-width: 180px; }
-.gh-menu-actions { display: flex; justify-content: flex-end; }
 .gh-menu-item {
   appearance: none;
   font: inherit;
@@ -89,23 +110,6 @@ export const STYLE_TEXT = `
   cursor: pointer;
 }
 .gh-menu-item:hover { background: rgba(127, 127, 127, 0.12); }
-
-.gh-input, .gh-textarea {
-  font: inherit;
-  font-size: var(--dsh-font-size-sm, 12.5px);
-  width: 100%;
-  box-sizing: border-box;
-  padding: 6px 9px;
-  color: inherit;
-  background: transparent;
-  border: 1px solid var(--dsh-border, rgba(127, 127, 127, 0.35));
-  border-radius: var(--dsh-radius-md, 6px);
-}
-.gh-input:focus, .gh-textarea:focus {
-  outline: none;
-  border-color: var(--dsh-primary, #4d6bfe);
-}
-.gh-textarea { min-height: 76px; resize: vertical; }
 
 .gh-ci {
   padding: 1px 9px;

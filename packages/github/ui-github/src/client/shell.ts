@@ -42,6 +42,7 @@ export function createBrowserShell(ctx: Context): GitHubUiShell {
       return ctx.slots.inject(target, () =>
         ctx.slots.register({ name: target, id: 'github', order: SLOT_ORDER }, component))
     },
+    sessionId: () => currentSession,
     prompt: text => {
       if (currentSession === undefined) return
       void ctx.sessions.scope(currentSession).conversation.send(text)

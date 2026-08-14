@@ -107,12 +107,26 @@ export interface GitHubConnectConfig {
   authBaseURL?: string
   /** GitHub host a workspace remote must point at to activate flow-state. */
   host?: string
-  /** Workspace directory for git checks; defaults to the process cwd. */
+  /**
+   * Workspace-directory override for git checks (ADR-0010). Normally the
+   * calling session's `header.cwd` decides; this forces every check into one
+   * directory — a single-workspace or test knob. Absent both, the process cwd.
+   */
   cwd?: string
   /** Base branch override; otherwise the remote HEAD (falling back to `main`). */
   baseBranch?: string
   /** OAuth scope requested by the Device Flow. */
   scope?: string
+}
+
+/**
+ * Structural slice of the dsh session store (`ctx.get('sessions')`), optional
+ * like the credentials seam: resolve one live session's workspace directory
+ * (ADR-0010). Kept structural so non-dsh compositions need no dsh-session
+ * dependency.
+ */
+interface SessionCwdStore {
+  get(id: string): { header: { cwd?: string } } | undefined
 }
 
 /** Config with schema defaults applied. */
@@ -194,14 +208,17 @@ export class GitHubConnectService extends TypertRemoteService {
 
   private activeFlow: AbortController | undefined
   private lastFlowUpdate: DeviceFlowUpdate | undefined
-  private lastHead: string | undefined
-  private lastEmitted: GitHubFlowState['kind'] = 'hidden'
+  /** Detection caches keyed by the resolved workspace directory (ADR-0010: one dsh process serves many workspaces). */
+  private readonly lastHead = new Map<string, string>()
+  private readonly lastEmitted = new Map<string, GitHubFlowState['kind']>()
   private statusCache: { token: string, login: string } | undefined
 
   constructor(ctx: Context, config: GitHubConnectConfig = {}) {
     super(ctx, 'githubConnect')
     this.config = config as ResolvedConnectConfig
-    ctx.on('agent/turn-stopping', () => this.onTurnEnd())
+    // Defensive chaining on the payload: detection is best-effort and must
+    // never break the turn, even under a host that emits a leaner shape.
+    ctx.on('agent/turn-stopping', payload => this.onTurnEnd(payload?.agent?.session?.header?.cwd))
     ctx.on('credentials/updated', ref => {
       if ((ref as string) === this.config.credentialRef) this.statusCache = undefined
     })
@@ -311,16 +328,17 @@ export class GitHubConnectService extends TypertRemoteService {
    * @returns the draft title and optional body.
    */
   @Remote
-  async prDraft(): Promise<PrDraft> {
-    const facts = await this.repoFacts()
-    return derivePrDraft(facts.branch, await this.commitsAhead(facts.base))
+  async prDraft(request?: { sessionId?: string }): Promise<PrDraft> {
+    const cwd = this.cwd(request?.sessionId)
+    const facts = await this.repoFacts(cwd)
+    return derivePrDraft(facts.branch, await this.commitsAhead(facts.base, cwd))
   }
 
   /** Commits ahead of base, oldest first: prefer the remote-tracking base, else the local one, else none. */
-  private async commitsAhead(base: string): Promise<readonly DraftCommit[]> {
+  private async commitsAhead(base: string, cwd: string): Promise<readonly DraftCommit[]> {
     for (const range of [`origin/${base}..HEAD`, `${base}..HEAD`]) {
       try {
-        return parseCommitLog(await this.runGit(['log', '--reverse', commitLogFormat, range], this.cwd()))
+        return parseCommitLog(await this.runGit(['log', '--reverse', commitLogFormat, range], cwd))
       } catch {
         // Base ref absent in this form — try the next.
       }
@@ -333,12 +351,12 @@ export class GitHubConnectService extends TypertRemoteService {
    * [Create PR] button. Title/body arrive prefilled by the host and edited by
    * the user; the branch and base come from git. Idempotent through the seam
    * (ADR-0004).
-   * @param request - title, optional body, optional base override.
+   * @param request - title, optional body, optional base override, optional calling session (ADR-0010).
    * @returns the created-or-existing PR and the branches used.
    */
   @Remote
-  async createPr(request: { title: string, body?: string, base?: string }): Promise<CreatePrResult> {
-    const facts = await this.repoFacts()
+  async createPr(request: { title: string, body?: string, base?: string, sessionId?: string }): Promise<CreatePrResult> {
+    const facts = await this.repoFacts(this.cwd(request.sessionId))
     const base = request.base ?? facts.base
     const result = await this.ctx.github.createPullRequest({
       repo: facts.repo,
@@ -359,12 +377,12 @@ export class GitHubConnectService extends TypertRemoteService {
   /**
    * Merge one PR — the status bar's [Merge] dropdown, behind the host's
    * irreversible-action confirmation.
-   * @param request - the PR number and merge strategy.
+   * @param request - the PR number, merge strategy, and optional calling session (ADR-0010).
    * @returns GitHub's merge outcome.
    */
   @Remote
-  async mergePr(request: { number: number, method: MergeMethod }): Promise<{ merged: boolean, sha?: string }> {
-    const facts = await this.repoFacts()
+  async mergePr(request: { number: number, method: MergeMethod, sessionId?: string }): Promise<{ merged: boolean, sha?: string }> {
+    const facts = await this.repoFacts(this.cwd(request.sessionId))
     const token = await this.requireToken()
     const path = `/repos/${encodeURIComponent(facts.repo.owner)}/${encodeURIComponent(facts.repo.repo)}/pulls/${request.number}/merge`
     const json = await this.api(token, 'PUT', path, { merge_method: request.method }) as { merged?: unknown, sha?: unknown }
@@ -378,62 +396,67 @@ export class GitHubConnectService extends TypertRemoteService {
    * CI rollup for one PR — the badge poller's endpoint. The frontend owns the
    * cadence: poll with backoff and STOP while the page is hidden (risk table).
    * @param number - the PR number.
+   * @param sessionId - the calling session, deciding the workspace (ADR-0010).
    * @returns the rollup, or undefined when checks are unavailable.
    */
   @Remote
-  async prChecks(number: number): Promise<ChecksSummary | undefined> {
-    const facts = await this.repoFacts()
+  async prChecks(number: number, sessionId?: string): Promise<ChecksSummary | undefined> {
+    const facts = await this.repoFacts(this.cwd(sessionId))
     return this.checksSummary(facts.repo, number)
   }
 
   /**
    * Re-detect the flow state on demand (UI refresh after its own button
    * actions), bypassing the new-commits noise rule, and emit the result.
+   * @param request - optional calling session, deciding the workspace (ADR-0010).
    * @returns the freshly detected state.
    */
   @Remote
-  async refreshFlowState(): Promise<GitHubFlowState> {
+  async refreshFlowState(request?: { sessionId?: string }): Promise<GitHubFlowState> {
     if (await this.resolveToken() === undefined) return { kind: 'hidden' }
-    const snapshot = await detectFlowState(this.flowDeps())
-    if (snapshot.headSha !== undefined) this.lastHead = snapshot.headSha
-    this.emitState(snapshot.state)
+    const cwd = this.cwd(request?.sessionId)
+    const snapshot = await detectFlowState(this.flowDeps(cwd))
+    if (snapshot.headSha !== undefined) this.lastHead.set(cwd, snapshot.headSha)
+    this.emitState(snapshot.state, cwd)
     return snapshot.state
   }
 
   /**
    * Turn-end hook (ADR-0002): gated on a resolvable credential, skipped when
    * the turn produced no new commits, and NEVER allowed to break the turn.
+   * The workspace is the turn's session `header.cwd` (ADR-0010).
    */
-  private async onTurnEnd(): Promise<void> {
+  private async onTurnEnd(sessionCwd: string | undefined): Promise<void> {
     try {
       if (await this.resolveToken() === undefined) return
+      const cwd = sessionCwd ?? this.config.cwd ?? process.cwd()
       let head: string
       try {
-        head = (await this.runGit(['rev-parse', 'HEAD'], this.cwd())).trim()
+        head = (await this.runGit(['rev-parse', 'HEAD'], cwd)).trim()
       } catch {
         return
       }
-      if (head === this.lastHead) return
-      this.lastHead = head
-      const snapshot = await detectFlowState(this.flowDeps())
-      this.emitState(snapshot.state)
+      if (head === this.lastHead.get(cwd)) return
+      this.lastHead.set(cwd, head)
+      const snapshot = await detectFlowState(this.flowDeps(cwd))
+      this.emitState(snapshot.state, cwd)
     } catch {
       // Detection is best-effort; a turn must never fail because of it.
     }
   }
 
-  /** Emit a state change, collapsing repeated hides (unconnected users see nothing). */
-  private emitState(state: GitHubFlowState): void {
-    if (state.kind === 'hidden' && this.lastEmitted === 'hidden') return
-    this.lastEmitted = state.kind
+  /** Emit a state change, collapsing repeated hides per workspace (unconnected users see nothing; an untouched workspace starts hidden). */
+  private emitState(state: GitHubFlowState, cwd: string): void {
+    if (state.kind === 'hidden' && (this.lastEmitted.get(cwd) ?? 'hidden') === 'hidden') return
+    this.lastEmitted.set(cwd, state.kind)
     this.ctx.emit('github/flow-state', state)
   }
 
-  /** Assemble the injected detection dependencies. */
-  private flowDeps(): FlowStateDeps {
+  /** Assemble the injected detection dependencies over one workspace directory. */
+  private flowDeps(cwd: string): FlowStateDeps {
     return {
       runGit: this.runGit,
-      cwd: this.cwd(),
+      cwd,
       host: this.config.host,
       baseBranch: this.config.baseBranch,
       findOpenPr: (repo, branch) => this.findBranchPr(repo, branch, 'open'),
@@ -465,8 +488,7 @@ export class GitHubConnectService extends TypertRemoteService {
   }
 
   /** The workspace's repo/branch/base facts, or a typed refusal for the buttons. */
-  private async repoFacts(): Promise<{ repo: GitHubRepoRef, branch: string, base: string }> {
-    const cwd = this.cwd()
+  private async repoFacts(cwd: string): Promise<{ repo: GitHubRepoRef, branch: string, base: string }> {
     let remote: string
     try {
       remote = await this.runGit(['remote', 'get-url', 'origin'], cwd)
@@ -482,8 +504,27 @@ export class GitHubConnectService extends TypertRemoteService {
     return { repo, branch, base }
   }
 
-  private cwd(): string {
-    return this.config.cwd ?? process.cwd()
+  /**
+   * Resolve the workspace directory for one call (ADR-0010): the calling
+   * session's `header.cwd` through the optional session store, else the
+   * config override, else the process cwd.
+   */
+  private cwd(sessionId?: string): string {
+    return this.sessionCwd(sessionId) ?? this.config.cwd ?? process.cwd()
+  }
+
+  /** The calling session's workspace directory, or undefined outside a dsh session composition. */
+  private sessionCwd(sessionId: string | undefined): string | undefined {
+    if (sessionId === undefined) return undefined
+    const store = this.ctx.get('sessions') as SessionCwdStore | undefined
+    if (store === undefined || typeof store.get !== 'function') return undefined
+    try {
+      const cwd = store.get(sessionId)?.header.cwd
+      return typeof cwd === 'string' && cwd !== '' ? cwd : undefined
+    } catch {
+      // An unknown or torn-down session decides nothing — fall through.
+      return undefined
+    }
   }
 
   /** Resolve the credential: seam first, process environment as the fallback. */

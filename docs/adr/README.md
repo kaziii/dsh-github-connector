@@ -27,3 +27,5 @@
 | [0007](0007-ui-binds-client-shell-via-port.md) | `dsh-ui-github` 通过注入端口对接客户端外壳 | Accepted |
 | [0008](0008-settings-card-entry-and-real-slot-binding.md) | 连接入口落在插件配置卡片，端口按 dsh 真实 slot API 绑定 | Accepted |
 | [0009](0009-polling-instead-of-forwarded-events.md) | UI 状态更新用轮询与 credentials 事件，不依赖自定义宿主事件转发 | Accepted |
+| [0010](0010-session-cwd-anchors-flow-state.md) | flow-state 与 PR 操作以会话工作区为锚点，不再用进程 cwd | Accepted |
+| [0011](0011-create-pr-via-agent-prompt.md) | 状态条 [创建 PR] 直接派发 agent 会话创建，不再弹预填面板 | Accepted |

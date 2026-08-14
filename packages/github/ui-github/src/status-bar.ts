@@ -10,7 +10,7 @@
  * @module dsh-ui-github/status-bar
  */
 
-import { createElement as h, useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactElement, type ReactNode } from 'react'
+import { createElement as h, useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import type { ChecksSummary, GitHubFlowState, MergeMethod } from 'dsh-github-connect'
 import { catalogFor, type UiLocale } from './i18n.ts'
 import { MERGE_METHODS, sameFlowState } from './model.ts'
@@ -47,6 +47,9 @@ const DEFAULT_FLOW_POLL: PollPolicy = { initialMs: 30_000, maxMs: 300_000 }
 /** How long the merged banner stays before the bar collapses (design §1 stage 3). */
 const DEFAULT_COLLAPSE_MS = 5_000
 
+/** How long [Create PR] stays loading before giving up on the agent turn (ADR-0011). */
+const DEFAULT_CREATE_TIMEOUT_MS = 180_000
+
 /** Props of {@link PrStatusBar}. */
 export interface PrStatusBarProps {
   readonly remote: GitHubUiRemote
@@ -56,11 +59,13 @@ export interface PrStatusBarProps {
   /** Flow-state poll pacing (ADR-0009), independent of the CI badge's. */
   readonly flowPoll?: PollPolicy
   readonly collapseMs?: number
+  /** Loading cap of the agent-driven [Create PR] (ADR-0011). */
+  readonly createTimeoutMs?: number
   readonly timers?: StatusBarTimers
 }
 
 /** Which dropdown is open. */
-type OpenMenu = 'none' | 'create' | 'merge'
+type OpenMenu = 'none' | 'merge'
 
 /**
  * The PR status bar.
@@ -73,18 +78,19 @@ export function PrStatusBar(props: PrStatusBarProps): ReactElement | null {
   const poll = props.poll ?? DEFAULT_POLL
   const flowPoll = props.flowPoll ?? DEFAULT_FLOW_POLL
   const collapseMs = props.collapseMs ?? DEFAULT_COLLAPSE_MS
+  const createTimeoutMs = props.createTimeoutMs ?? DEFAULT_CREATE_TIMEOUT_MS
   const timers = props.timers ?? defaultTimers
 
   const [state, setState] = useState<GitHubFlowState>({ kind: 'hidden' })
   const [ci, setCi] = useState<ChecksSummary | undefined>(undefined)
   const [notice, setNotice] = useState<string | undefined>(undefined)
   const [menu, setMenu] = useState<OpenMenu>('none')
-  const [title, setTitle] = useState('')
-  const [body, setBody] = useState('')
-  const [drafting, setDrafting] = useState(false)
-  // Which branch the panel was last prefilled for: the host draft is fetched
-  // once per branch, and never overwrites what the user already edited.
-  const draftedRef = useRef<string | undefined>(undefined)
+  // The [Create PR] press handed the work to the agent turn (ADR-0011); the
+  // button stays loading until the polled state leaves pr-ready or times out.
+  const [creating, setCreating] = useState(false)
+  // What the user dismissed with [×]: the bar stays hidden while polls keep
+  // returning the same state, and reappears on any real transition.
+  const dismissedRef = useRef<GitHubFlowState | undefined>(undefined)
 
   // The poller compares against what is currently shown without re-running
   // its effect on every render.
@@ -110,7 +116,7 @@ export function PrStatusBar(props: PrStatusBarProps): ReactElement | null {
    * surfaces infrastructure noise (design: unconnected users see nothing).
    */
   const sync = useCallback(async (): Promise<void> => {
-    const result = await remote.githubConnect.refreshFlowState()
+    const result = await remote.githubConnect.refreshFlowState({ sessionId: shell.sessionId() })
     if (!result.ok) return
     const next = result.value
     if (next.kind === 'pr-merged'
@@ -118,9 +124,14 @@ export function PrStatusBar(props: PrStatusBarProps): ReactElement | null {
       && collapsedRef.current.branch === next.branch
       && collapsedRef.current.number === next.number) return
     collapsedRef.current = undefined
+    // A dismissed bar stays dismissed while the state holds; any transition clears it.
+    if (dismissedRef.current !== undefined) {
+      if (sameFlowState(dismissedRef.current, next)) return
+      dismissedRef.current = undefined
+    }
     if (!sameFlowState(stateRef.current, next)) apply(next)
     else if (next.kind === 'pr-open' && next.ci !== undefined) setCi(next.ci)
-  }, [remote, apply])
+  }, [remote, shell, apply])
 
   useEffect(() => {
     let disposed = false
@@ -185,7 +196,7 @@ export function PrStatusBar(props: PrStatusBarProps): ReactElement | null {
       handle = timers.setTimeout(() => void tick(), delay)
     }
     const tick = async (): Promise<void> => {
-      const result = await remote.githubConnect.prChecks(number)
+      const result = await remote.githubConnect.prChecks(number, shell.sessionId())
       if (disposed) return
       if (result.ok) setCi(result.value)
       delay = Math.min(delay * 2, poll.maxMs)
@@ -206,50 +217,73 @@ export function PrStatusBar(props: PrStatusBarProps): ReactElement | null {
     }
   }, [state, remote, shell, poll, timers])
 
-  const openCreate = useCallback(async (branch: string): Promise<void> => {
-    if (menu === 'create') {
-      setMenu('none')
-      return
-    }
-    setMenu('create')
-    if (draftedRef.current === branch) return
-    draftedRef.current = branch
-    setDrafting(true)
-    const result = await remote.githubConnect.prDraft()
-    setDrafting(false)
-    // Prefill only (design §6): a failed draft leaves the editable fields
-    // empty rather than surfacing infrastructure noise.
-    if (result.ok) {
-      setTitle(result.value.title)
-      setBody(result.value.body ?? '')
-    }
-  }, [menu, remote])
+  /**
+   * [Create PR] (ADR-0011): hand the whole job to the agent turn — it derives
+   * the title and description from the session context and calls the GitHub
+   * tools itself. The button holds a loading state that the flow-state poll
+   * releases once the state leaves pr-ready.
+   */
+  const createViaAgent = useCallback((branch: string, base: string): void => {
+    setNotice(undefined)
+    setCreating(true)
+    shell.prompt(catalog.createPrompt(branch, base))
+  }, [shell, catalog])
 
-  const createPr = useCallback(async (branch: string): Promise<void> => {
-    const trimmedTitle = title.trim()
-    const trimmedBody = body.trim()
-    const result = await remote.githubConnect.createPr({
-      title: trimmedTitle === '' ? branch : trimmedTitle,
-      ...trimmedBody === '' ? {} : { body: trimmedBody },
-    })
-    if (!result.ok) {
-      setNotice(result.error.message)
-      return
+  /** [×]: hide the bar until the flow state actually changes. */
+  const dismiss = useCallback((): void => {
+    dismissedRef.current = stateRef.current
+    setCreating(false)
+    setMenu('none')
+    setState({ kind: 'hidden' })
+  }, [])
+
+  // The loading state lives only on pr-ready; any adopted transition ends it.
+  useEffect(() => {
+    if (state.kind !== 'pr-ready') setCreating(false)
+  }, [state.kind])
+
+  // While the agent works, re-sync at the badge pace without backoff. The
+  // creation window is short and timeout-capped, so this poller deliberately
+  // skips the page-visibility pause of the long-lived ones (ADR-0011).
+  useEffect(() => {
+    if (!creating) return
+    let disposed = false
+    let handle: unknown
+    const schedule = (): void => {
+      handle = timers.setTimeout(() => void tick(), poll.initialMs)
     }
-    const refreshed = await remote.githubConnect.refreshFlowState()
-    if (refreshed.ok) apply(refreshed.value)
-  }, [remote, title, body, apply])
+    const tick = async (): Promise<void> => {
+      await sync()
+      if (!disposed) schedule()
+    }
+    schedule()
+    return () => {
+      disposed = true
+      timers.clearTimeout(handle)
+    }
+  }, [creating, sync, poll, timers])
+
+  // The agent may fail or be cancelled without a state transition: cap the
+  // loading and point at the conversation instead of spinning forever.
+  useEffect(() => {
+    if (!creating) return
+    const handle = timers.setTimeout(() => {
+      setCreating(false)
+      setNotice(catalog.createTimedOut)
+    }, createTimeoutMs)
+    return () => timers.clearTimeout(handle)
+  }, [creating, timers, createTimeoutMs, catalog])
 
   const merge = useCallback(async (number: number, method: MergeMethod): Promise<void> => {
     setMenu('none')
     const confirmed = await shell.confirmIrreversible(catalog.mergeConfirm(number, catalog.mergeMethodLabel(method)))
     if (!confirmed) return
-    const result = await remote.githubConnect.mergePr({ number, method })
+    const result = await remote.githubConnect.mergePr({ number, method, sessionId: shell.sessionId() })
     if (!result.ok) {
       setNotice(catalog.mergeFailed(result.error.message))
       return
     }
-    const refreshed = await remote.githubConnect.refreshFlowState()
+    const refreshed = await remote.githubConnect.refreshFlowState({ sessionId: shell.sessionId() })
     if (refreshed.ok) apply(refreshed.value)
   }, [remote, shell, catalog, apply])
 
@@ -258,40 +292,30 @@ export function PrStatusBar(props: PrStatusBarProps): ReactElement | null {
   const parts: ReactNode[] = []
   switch (state.kind) {
     case 'pr-ready': {
-      const branch = state.branch
+      // Claude-Code-style chip: repo + branch on the left, the diff stat in a
+      // pill, the action and the dismiss on the right (ADR-0011).
       parts.push(
-        h('span', { key: 'ahead', className: 'gh-flow-text' }, catalog.aheadOfBase(state.branch, state.base, state.aheadCount)),
+        h('span', {
+          key: 'repo',
+          className: 'gh-repo',
+          title: catalog.aheadOfBase(state.branch, state.base, state.aheadCount),
+        }, state.repo.repo),
+        h('span', { key: 'branch', className: 'gh-branch' }, state.branch),
+      )
+      if (state.additions !== undefined || state.deletions !== undefined) {
+        parts.push(h('span', { key: 'diff', className: 'gh-diff' },
+          h('span', { className: 'gh-add' }, `+${state.additions ?? 0}`),
+          h('span', { className: 'gh-del' }, `-${state.deletions ?? 0}`)))
+      }
+      parts.push(
         h('span', { key: 'spacer', className: 'gh-spacer' }),
         h('button', {
           key: 'create',
-          className: 'gh-btn gh-btn-primary',
-          onClick: () => void openCreate(branch),
-        }, catalog.createPrButton),
+          className: 'gh-btn',
+          disabled: creating,
+          onClick: () => createViaAgent(state.branch, state.base),
+        }, creating ? catalog.creatingButton : catalog.createPrButton),
       )
-      if (menu === 'create') {
-        parts.push(h('div', { key: 'create-menu', className: 'gh-menu gh-create-menu' },
-          h('input', {
-            className: 'gh-input',
-            value: title,
-            disabled: drafting,
-            placeholder: drafting ? catalog.draftGenerating : catalog.prTitlePlaceholder,
-            onChange: (event: ChangeEvent<HTMLInputElement>) => setTitle(event.target.value),
-          }),
-          h('textarea', {
-            className: 'gh-textarea',
-            value: body,
-            disabled: drafting,
-            placeholder: drafting ? catalog.draftGenerating : catalog.prBodyPlaceholder,
-            onChange: (event: ChangeEvent<HTMLTextAreaElement>) => setBody(event.target.value),
-          }),
-          h('div', { className: 'gh-menu-actions' },
-            h('button', {
-              className: 'gh-btn gh-btn-primary',
-              disabled: drafting,
-              onClick: () => void createPr(branch),
-            }, catalog.confirmCreateButton)),
-        ))
-      }
       break
     }
     case 'pr-open': {
@@ -323,5 +347,14 @@ export function PrStatusBar(props: PrStatusBarProps): ReactElement | null {
       break
   }
   if (notice !== undefined) parts.push(h('span', { key: 'notice', className: 'gh-notice' }, notice))
+  if (state.kind === 'pr-ready' || state.kind === 'pr-open') {
+    parts.push(h('button', {
+      key: 'close',
+      className: 'gh-close',
+      'aria-label': catalog.dismissLabel,
+      title: catalog.dismissLabel,
+      onClick: dismiss,
+    }, '×'))
+  }
   return h('div', { className: 'gh-status-bar' }, ...parts)
 }

@@ -5,7 +5,7 @@
 dsh web 客户端的 **GitHub 工作流 UI**（design §1）：两个 React slot 填充件，完全由 `dsh-github-connect` 的 `@Remote` 方法加前端持节奏的轮询驱动（ADR-0009——dsh 不向浏览器转发自定义宿主事件；本 UI 唯一使用的转发事件是 `credentials/updated`）。
 
 1. **"Connect GitHub" 卡片**（作为 `settings.plugin.item` 卡片落在 dsh 插件 → 插件配置 页，ADR-0008）：[连接 GitHub] 启动 Device Flow——用户码自动复制、授权页自动打开，进度按服务端节奏轮询 `deviceFlowStatus` 获得（`slow_down` 时拉长间隔）；已连接用户看到 `已连接 @login` 与 [断开连接]。token 永不经过前端。
-2. **对话 PR 状态条**（`conversation.input.dock` slot），即 design §1 的三阶段：`feat/x 领先 main 3 个提交` + [创建 PR ▾]（标题/描述由宿主经 `prDraft` 从领先提交预填，可再编辑）→ `#123 · CI 徽章` + [AI 审查] [Merge ▾]（squash / merge commit / rebase / 在 GitHub 打开）→ `#123 已合并`，短暂展示后收起。未连接用户不可见；断开连接后立即消失。[创建 PR] 与 [Merge] 直调 `@Remote`（零模型回合，Merge 走不可逆确认）；[AI 审查] 是唯一消耗回合的按钮，经 `sessions.prompt`。
+2. **对话 PR 状态条**（`conversation.input.dock` slot），Claude Code 风格的紧凑胶囊条、贴合会话列宽，即 design §1 的三阶段：`repo feat/x +N −M` + [创建 PR] + [×] → `#123 · CI 徽章` + [AI 审查] [Merge ▾]（squash / merge commit / rebase / 在 GitHub 打开）+ [×] → `#123 已合并`，短暂展示后收起。未连接用户不可见；断开连接后立即消失；[×] 收起胶囊直到状态变化。[创建 PR] 单击即经 `sessions.prompt` 交给 agent 回合——模型根据会话上下文归纳标题/描述并用 GitHub 工具创建，按钮保持 loading 至轮询状态迁移（超时兜底，ADR-0011）；[Merge] 直调 `@Remote` 并走不可逆确认；[AI 审查] 同样经 `sessions.prompt` 消耗回合。
 
 两个轮询器都指数退避且**页面不可见时停止**：CI 徽章（`prChecks`）与 flow-state（`refreshFlowState`，未变化的轮次绝不关闭已打开的下拉、丢弃草稿或让已收起的合并横幅复现）——风险表中"轮询不能吃掉 rate limit"的规则。
 

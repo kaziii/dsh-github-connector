@@ -92,6 +92,7 @@ export function sameFlowState(a: GitHubFlowState, b: GitHubFlowState): boolean {
       return true
     case 'pr-ready':
       return b.kind === 'pr-ready' && a.branch === b.branch && a.base === b.base && a.aheadCount === b.aheadCount
+        && a.additions === b.additions && a.deletions === b.deletions
     case 'pr-open':
       return b.kind === 'pr-open' && a.branch === b.branch && a.number === b.number && a.url === b.url
     case 'pr-merged':

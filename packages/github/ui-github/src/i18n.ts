@@ -27,10 +27,10 @@ export interface UiCatalog {
   readonly retryButton: string
   readonly aheadOfBase: (branch: string, base: string, count: number) => string
   readonly createPrButton: string
-  readonly prTitlePlaceholder: string
-  readonly prBodyPlaceholder: string
-  readonly draftGenerating: string
-  readonly confirmCreateButton: string
+  readonly creatingButton: string
+  readonly createPrompt: (branch: string, base: string) => string
+  readonly createTimedOut: string
+  readonly dismissLabel: string
   readonly openPr: (number: number) => string
   readonly ciBadge: (summary: ChecksSummary) => string
   readonly reviewButton: string
@@ -59,10 +59,10 @@ const EN: UiCatalog = Object.freeze<UiCatalog>({
   retryButton: 'Retry',
   aheadOfBase: (branch, base, count) => `${branch} is ahead of ${base} by ${count} ${count === 1 ? 'commit' : 'commits'}`,
   createPrButton: 'Create PR',
-  prTitlePlaceholder: 'PR title',
-  prBodyPlaceholder: 'PR description (optional)',
-  draftGenerating: 'Drafting the title and description…',
-  confirmCreateButton: 'Create pull request',
+  creatingButton: 'Creating PR…',
+  createPrompt: (branch, base) => `Create a pull request from ${branch} into ${base}: derive a clear title and description from this session's work and commit history, then create it with the GitHub tools.`,
+  createTimedOut: 'PR creation timed out — check the conversation for details.',
+  dismissLabel: 'Dismiss',
   openPr: number => `#${number}`,
   ciBadge: summary => {
     switch (summary) {
@@ -103,10 +103,10 @@ const ZH_CN: UiCatalog = Object.freeze<UiCatalog>({
   retryButton: '重试',
   aheadOfBase: (branch, base, count) => `${branch} 领先 ${base} ${count} 个提交`,
   createPrButton: '创建 PR',
-  prTitlePlaceholder: 'PR 标题',
-  prBodyPlaceholder: 'PR 描述（可选）',
-  draftGenerating: '正在生成标题与描述…',
-  confirmCreateButton: '创建 Pull Request',
+  creatingButton: '创建中…',
+  createPrompt: (branch, base) => `请从 ${branch} 向 ${base} 创建一个 Pull Request：根据本次会话的工作与提交记录归纳标题和描述，然后用 GitHub 工具创建。`,
+  createTimedOut: '创建 PR 超时——请在会话中查看执行情况。',
+  dismissLabel: '关闭',
   openPr: number => `#${number}`,
   ciBadge: summary => {
     switch (summary) {

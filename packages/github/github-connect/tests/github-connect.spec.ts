@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -395,6 +395,39 @@ describe('flow-state detection (fixture repositories)', () => {
       aheadCount: 2,
     })
     expect(headSha).toMatch(/^[0-9a-f]{40}$/)
+  })
+
+  it('summarizes the branch diff into the pr-ready stat (insertion- and deletion-only)', async () => {
+    // Insertions only: one file added on the branch.
+    const added = await makeRepo({ remote: 'https://github.com/octo/hello-world.git', branch: 'feat/x' })
+    await writeFile(join(added, 'a.txt'), 'one\ntwo\n')
+    await git(['add', '.'], added)
+    await git(['commit', '-m', 'add a'], added)
+    expect((await detectFlowState(fixtureDeps(added))).state)
+      .toMatchObject({ kind: 'pr-ready', aheadCount: 1, additions: 2, deletions: 0 })
+
+    // Deletions only: a line removed from a file the base already has.
+    const removed = await makeRepo({ remote: 'https://github.com/octo/hello-world.git' })
+    await writeFile(join(removed, 'b.txt'), 'one\ntwo\nthree\n')
+    await git(['add', '.'], removed)
+    await git(['commit', '-m', 'add b'], removed)
+    await git(['update-ref', 'refs/remotes/origin/main', 'main'], removed)
+    await git(['checkout', '-q', '-b', 'feat/y'], removed)
+    await writeFile(join(removed, 'b.txt'), 'one\nthree\n')
+    await git(['commit', '-am', 'trim b'], removed)
+    expect((await detectFlowState(fixtureDeps(removed))).state)
+      .toMatchObject({ kind: 'pr-ready', aheadCount: 1, additions: 0, deletions: 1 })
+  })
+
+  it('omits the diff stat when no diff range resolves', async () => {
+    const dir = await makeRepo({ remote: 'https://github.com/octo/hello-world.git', branch: 'feat/x', ahead: 1 })
+    const deps = fixtureDeps(dir)
+    const { state } = await detectFlowState({
+      ...deps,
+      runGit: (args, cwd) => args[0] === 'diff' ? Promise.reject(new Error('no diff here')) : deps.runGit(args, cwd),
+    })
+    expect(state).toMatchObject({ kind: 'pr-ready', aheadCount: 1 })
+    expect('additions' in state).toBe(false)
   })
 
   it('falls back to the local base ref when origin/main is absent', async () => {
@@ -1000,6 +1033,84 @@ describe('coverage edges', () => {
     await suite.credentials.set('GITHUB_TOKEN' as CredentialRef, 'gho_1')
     const state = await suite.service.refreshFlowState()
     expect(['hidden', 'pr-ready', 'pr-open', 'pr-merged']).toContain(state.kind)
+  })
+})
+
+// —— session workspace resolution (ADR-0010) ——————————————————————————————————
+
+describe('session workspace resolution (ADR-0010)', () => {
+  /** An empty non-repository directory, so the config fallback reads hidden. */
+  async function emptyDir(): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-github-connect-nosession-'))
+    repos.push(dir)
+    return dir
+  }
+
+  it('resolves the calling session header cwd over the config workspace', async () => {
+    const repoDir = await makeRepo({ remote: 'git@github.com:octo/hello-world.git', branch: 'feat/x', ahead: 1 })
+    const suite = await mountService({ cwd: await emptyDir() })
+    suite.service.fetchImpl = scriptedFetch([{ match: url => url.includes('/pulls?'), respond: () => jsonResponse([]) }]).fetch
+    suite.ctx.provide('sessions', { get: (id: string) => id === 's1' ? { header: { cwd: repoDir } } : undefined } as never)
+    await suite.credentials.set('GITHUB_TOKEN' as CredentialRef, 'gho_1')
+
+    await expect(suite.service.refreshFlowState({ sessionId: 's1' })).resolves.toMatchObject({ kind: 'pr-ready', aheadCount: 1 })
+    // Without a session the config workspace (an empty directory) decides: hidden.
+    await expect(suite.service.refreshFlowState()).resolves.toEqual({ kind: 'hidden' })
+    // An unknown session falls back the same way.
+    await expect(suite.service.refreshFlowState({ sessionId: 'ghost' })).resolves.toEqual({ kind: 'hidden' })
+
+    const draft = await suite.service.prDraft({ sessionId: 's1' })
+    expect(draft.title).not.toBe('')
+  })
+
+  it('falls back through a missing, malformed, throwing, or cwd-less session store', async () => {
+    const suite = await mountService({ cwd: await emptyDir() })
+    suite.service.fetchImpl = scriptedFetch([]).fetch
+    await suite.credentials.set('GITHUB_TOKEN' as CredentialRef, 'gho_1')
+
+    // No sessions service at all.
+    await expect(suite.service.refreshFlowState({ sessionId: 's1' })).resolves.toEqual({ kind: 'hidden' })
+    // One provided store, mutated per shape (the service re-reads it each call).
+    const store: { get?: unknown } = {}
+    suite.ctx.provide('sessions', store as never)
+    // A store without a callable get.
+    await expect(suite.service.refreshFlowState({ sessionId: 's1' })).resolves.toEqual({ kind: 'hidden' })
+    // A store whose lookup throws.
+    store.get = () => {
+      throw new Error('torn down')
+    }
+    await expect(suite.service.refreshFlowState({ sessionId: 's1' })).resolves.toEqual({ kind: 'hidden' })
+    // A session whose header carries no usable cwd.
+    store.get = () => ({ header: { cwd: '' } })
+    await expect(suite.service.refreshFlowState({ sessionId: 's1' })).resolves.toEqual({ kind: 'hidden' })
+  })
+
+  it('detects the turn session workspace from the turn-stopping payload', async () => {
+    const repoDir = await makeRepo({ remote: 'git@github.com:octo/hello-world.git', branch: 'feat/x', ahead: 1 })
+    const suite = await mountService({ cwd: await emptyDir() })
+    suite.service.fetchImpl = scriptedFetch([{ match: url => url.includes('/pulls?'), respond: () => jsonResponse([]) }]).fetch
+    await suite.credentials.set('GITHUB_TOKEN' as CredentialRef, 'gho_1')
+
+    // Leaner payload shapes never break the turn (defensive chaining).
+    await suite.ctx.serial('agent/turn-stopping', undefined as never)
+    await suite.ctx.serial('agent/turn-stopping', { agent: { session: {} } } as never)
+    expect(suite.flowStates).toHaveLength(0)
+
+    await suite.ctx.serial('agent/turn-stopping', {
+      agent: { session: { header: { cwd: repoDir } } },
+      turn: 1,
+      signal: new AbortController().signal,
+    } as never)
+    expect(suite.flowStates).toHaveLength(1)
+    expect(suite.flowStates[0]).toMatchObject({ kind: 'pr-ready', aheadCount: 1 })
+  })
+
+  it('falls back to the process cwd when neither the session nor the config decide', async () => {
+    const suite = await mountService({})
+    suite.service.fetchImpl = scriptedFetch([]).fetch
+    await suite.credentials.set('GITHUB_TOKEN' as CredentialRef, 'gho_1')
+    // Never throws, whatever the surrounding checkout looks like.
+    await suite.turnEnd()
   })
 })
 

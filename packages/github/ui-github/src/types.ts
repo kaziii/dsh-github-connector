@@ -51,11 +51,15 @@ declare module '@deepseek-ai/dsh-typert-protocol/types' {
     'githubConnect/startDeviceFlow': () => Promise<RemoteResult<DeviceFlowPrompt>>
     'githubConnect/deviceFlowStatus': () => Promise<RemoteResult<DeviceFlowUpdate | undefined>>
     'githubConnect/disconnect': () => Promise<RemoteResult<void>>
-    'githubConnect/prDraft': () => Promise<RemoteResult<PrDraft>>
-    'githubConnect/createPr': (request: { title: string, body?: string, base?: string }) => Promise<RemoteResult<CreatePrResult>>
-    'githubConnect/mergePr': (request: { number: number, method: MergeMethod }) => Promise<RemoteResult<{ merged: boolean, sha?: string }>>
-    'githubConnect/prChecks': (number: number) => Promise<RemoteResult<ChecksSummary | undefined>>
-    'githubConnect/refreshFlowState': () => Promise<RemoteResult<GitHubFlowState>>
+    // ADR-0010: the git-touching methods carry the calling session so the host
+    // resolves that session's workspace directory. The parameter is declared
+    // non-optional (the client call layer demands an exact argument count);
+    // pass `undefined` fields freely — they never reach the wire.
+    'githubConnect/prDraft': (request: { sessionId?: string | undefined }) => Promise<RemoteResult<PrDraft>>
+    'githubConnect/createPr': (request: { title: string, body?: string, base?: string, sessionId?: string | undefined }) => Promise<RemoteResult<CreatePrResult>>
+    'githubConnect/mergePr': (request: { number: number, method: MergeMethod, sessionId?: string | undefined }) => Promise<RemoteResult<{ merged: boolean, sha?: string }>>
+    'githubConnect/prChecks': (number: number, sessionId: string | undefined) => Promise<RemoteResult<ChecksSummary | undefined>>
+    'githubConnect/refreshFlowState': (request: { sessionId?: string | undefined }) => Promise<RemoteResult<GitHubFlowState>>
   }
   interface TypertRemoteNamespaceMap {
     githubConnect: TypertRemoteNamespace<'githubConnect'>
@@ -111,6 +115,12 @@ export interface GitHubUiShell {
    * @returns the registration's disposer.
    */
   registerSlot(slot: GitHubUiSlotId, render: () => ReactNode): () => void
+  /**
+   * The session the dock currently renders for (ADR-0010): its id rides every
+   * git-touching Remote call so the host detects in that session's workspace.
+   * @returns the session id, or undefined before the first dock render.
+   */
+  sessionId(): string | undefined
   /**
    * Send one prompt into the active session — the [AI review] button's path,
    * the only button that spends a model turn (design §6).

@@ -15,7 +15,8 @@ export type ChecksSummary = 'pending' | 'passing' | 'failing'
 /** The four states of the conversation PR status bar (design §2). */
 export type GitHubFlowState =
   | { kind: 'hidden' }
-  | { kind: 'pr-ready', repo: GitHubRepoRef, branch: string, base: string, aheadCount: number }
+  /** `additions`/`deletions` summarize the diff against the base (the bar's +N −M pill); absent when the diff is empty or unreadable. */
+  | { kind: 'pr-ready', repo: GitHubRepoRef, branch: string, base: string, aheadCount: number, additions?: number, deletions?: number }
   | { kind: 'pr-open', repo: GitHubRepoRef, branch: string, number: number, url?: string, ci?: ChecksSummary }
   | { kind: 'pr-merged', repo: GitHubRepoRef, branch: string, number: number }
 
@@ -118,7 +119,7 @@ export async function detectFlowState(deps: FlowStateDeps): Promise<FlowStateSna
     }
     const aheadCount = await countAhead(deps, base)
     if (aheadCount > 0) {
-      return { state: { kind: 'pr-ready', repo, branch, base, aheadCount }, headSha }
+      return { state: { kind: 'pr-ready', repo, branch, base, aheadCount, ...await diffStat(deps, base) ?? {} }, headSha }
     }
     return { state: { kind: 'hidden' }, headSha }
   } catch {
@@ -152,4 +153,25 @@ async function countAhead(deps: FlowStateDeps, base: string): Promise<number> {
     }
   }
   return 0
+}
+
+/**
+ * The branch's diff summary against the base (`--shortstat` over the merge
+ * base), feeding the bar's +N −M pill. Same range preference as
+ * {@link countAhead}; an empty or unreadable diff yields undefined so the
+ * pill simply does not render.
+ */
+async function diffStat(deps: FlowStateDeps, base: string): Promise<{ additions: number, deletions: number } | undefined> {
+  for (const range of [`origin/${base}...HEAD`, `${base}...HEAD`]) {
+    try {
+      const summary = (await deps.runGit(['diff', '--shortstat', range], deps.cwd)).trim()
+      const additions = /(\d+) insertion/.exec(summary)?.[1]
+      const deletions = /(\d+) deletion/.exec(summary)?.[1]
+      if (additions === undefined && deletions === undefined) return undefined
+      return { additions: Number(additions ?? 0), deletions: Number(deletions ?? 0) }
+    } catch {
+      // Base ref absent in this form — try the next.
+    }
+  }
+  return undefined
 }
