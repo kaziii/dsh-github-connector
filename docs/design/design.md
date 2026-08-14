@@ -24,7 +24,7 @@
 - 本回合是否产生了新提交
 - 该 head 分支是否已有开着的 PR、PR 状态与 CI conclusion
 
-归纳为状态机推给前端（`github/flow-state` 事件）：
+归纳为状态机供前端取用（宿主内部 `github/flow-state` 事件；浏览器侧由前端持节奏轮询 `refreshFlowState` 获得，dsh 不转发自定义宿主事件，ADR-0009）：
 
 ```
 未连接 / 非 git 仓库 / 无领先  →  隐藏
@@ -66,7 +66,7 @@ PR 已合并                      →  确认后收起
 - dsh webserver 端口可配置甚至 `port: 0`（OS 分配），而 OAuth App 的 redirect_uri 必须预注册固定值
 - Device Flow 只需 client_id（无 secret），适合本地分发的开源工具
 
-流程：`POST /login/device/code` → 前端 `window.open` 授权页（user_code 自动复制）→ 宿主按 `interval` 轮询 `POST /login/oauth/access_token` → 拿到 token 后 `ctx.credentials.set('GITHUB_TOKEN', ...)` → `credentials/updated` 事件推给前端刷新状态。
+流程：`POST /login/device/code` → 前端 `window.open` 授权页（user_code 自动复制）→ 宿主按 `interval` 轮询 `POST /login/oauth/access_token` → 拿到 token 后 `ctx.credentials.set('GITHUB_TOKEN', ...)` → `credentials/updated` 事件推给前端刷新状态（该事件在 dsh 转发名单内；等待授权期间前端轮询 `connectStatus`，ADR-0009）。
 
 已知空白（二期）：凭据 seam 无"过期→刷新"钩子；GitHub 用户 token（`ghu_`）默认 8 小时过期。v1 用不过期授权模式绕过，refresh 机制后补。
 
@@ -103,7 +103,7 @@ CLI/headless 路径保持可用：直接配 `GITHUB_TOKEN` 环境变量或 `.cre
 | `confirmIrreversible(question)` | `RiskConfirmation` 组件（强制勾选确认，同包） |
 | `openExternal(url)` | 无命令式服务；组件渲染安全锚点 `<a target="_blank" rel="noopener noreferrer">`（仅 http(s)），端口成员在适配落地时收敛 |
 | `visibility` | 浏览器 `document.visibilitychange`（适配层自持） |
-| Typert Remote 客户端面 | 宿主 `TypertRemoteService` + `@Remote()` 生成 `./remote` 构件；client 半侧 `ctx.remote.$mount` 自行挂载（若外部挂载被阻断，回退为向 dsh 主仓提 PR 进 `packages/api/remotes` 挂载列表，ADR-0008 决策 4） |
+| Typert Remote 客户端面 | 宿主 `TypertRemoteService` + `@Remote()`；client 半侧 `ctx.remote.$mount` 自行挂载（源码级验证通过：宿主无命名空间白名单，挂载无阶段限制，ADR-0009 上下文）。contribution 先手写 strict 描述符（codec 只需 `.parse`），dsh generator 构件后补。事件订阅面仅 `'credentials/updated'`（dsh 不转发自定义宿主事件，其余状态走轮询，ADR-0009） |
 
 client 半侧形态：package.json `exports["./client"]` + `dsh.client.{inject, platform:"web"}` 双向一致，node 半侧空 `apply`；client 包间禁止 value import，跨插件走 cordis service。token 只走 credentials 域，不进 apiproxy `WEB_SETTINGS_NAMESPACES` 白名单。
 
