@@ -1,6 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-type-meta",
   "version": "0.0.1-rc.1",
+  "private": true,
   "description": "Local stub for the registry-restricted types-only peer @deepseek-ai/dsh-type-meta. dsh-session lists it as a peerDependency but never imports it at runtime; skipLibCheck absorbs the declaration-level references. Replace with the real package once it is fetchable.",
   "type": "module",
   "types": "index.d.ts"
