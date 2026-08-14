@@ -1,0 +1,25 @@
+{
+  "name": "github-quickstart",
+  "description": "Minimal runnable example of the dsh GitHub connector: real composition (seam + REST provider + model tools) driven by GITHUB_TOKEN, plus flow-state detection on the current git repository and the web-client UI wiring shape",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "demo": "node ../../scripts/require-build.ts && node main.ts"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-llm": "^0.0.1-rc.1",
+    "@deepseek-ai/dsh-system-prompt": "^0.0.1-rc.1",
+    "@deepseek-ai/dsh-tools": "^0.0.1-rc.1",
+    "dsh-github": "workspace:*",
+    "dsh-github-connect": "workspace:*",
+    "dsh-github-rest": "workspace:*",
+    "dsh-tool-github": "workspace:*",
+    "dsh-ui-github": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "react": "^19.2.8"
+  }
+}

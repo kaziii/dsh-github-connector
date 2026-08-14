@@ -4,7 +4,7 @@ Coding agent 在本仓库工作的入口上下文。人类贡献者同样适用�
 
 ## 项目一句话
 
-dsh-github-connector：为 [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) 提供 GitHub 连接能力——一键授权（Device Flow）、对话内 PR 工作流（创建 / AI 审查 / 合并）、模型侧 GitHub 工具。**当前处于设计定稿、未开工阶段，仓库内暂无代码，只有文档。**
+dsh-github-connector：为 [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) 提供 GitHub 连接能力——一键授权（Device Flow）、对话内 PR 工作流（创建 / AI 审查 / 合并）、模型侧 GitHub 工具。**当前状态：v1 已实现（M1–M7），五个包位于 `packages/github/`，可运行示例在 `examples/github-quickstart/`；仅剩依赖 dsh 宿主环境的两项手工验收挂起（见执行计划 M3/M6）。** 常用命令：`pnpm typecheck` / `pnpm test` / `pnpm test:coverage` / `pnpm build` / `pnpm gate:catalog`。
 
 ## 文档地图（改动前必读）
 

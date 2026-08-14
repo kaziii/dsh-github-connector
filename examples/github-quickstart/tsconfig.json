@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "lib",
+    // ui-wiring.ts shows the web client adapter, which touches DOM globals.
+    "lib": ["ES2024", "DOM", "DOM.Iterable"]
+  },
+  "include": [
+    "main.ts",
+    "ui-wiring.ts"
+  ],
+  "references": [
+    { "path": "../../packages/github/github" },
+    { "path": "../../packages/github/github-rest" },
+    { "path": "../../packages/github/tool-github" },
+    { "path": "../../packages/github/github-connect" },
+    { "path": "../../packages/github/ui-github" }
+  ]
+}

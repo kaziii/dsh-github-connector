@@ -1,6 +1,6 @@
 # dsh GitHub 连接器 — 设计文档
 
-> 状态：设计定稿，未开工。本文档是与 dsh 仓库调研结论一起沉淀的完整方案。
+> 状态：已实现（v1，M1–M7）。本文档是与 dsh 仓库调研结论一起沉淀的完整方案，随实现演进；客户端外壳的对接方式见 [ADR-0007](../adr/0007-ui-binds-client-shell-via-port.md)，依赖 dsh 宿主环境的两项手工验收仍挂起（见[执行计划](../plans/execution-plan.md) M3/M6）。
 > 实施拆解见[执行计划](../plans/execution-plan.md)；关键取舍的决策记录见 [ADR](../adr/README.md)。
 
 ## 1. 目标与产品体验
