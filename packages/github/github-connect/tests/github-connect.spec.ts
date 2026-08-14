@@ -8,6 +8,7 @@ import Credentials, { type CredentialInfo, type CredentialRef, type ResolvedCred
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 import GitHubRuntime, { GitHubError, type GitHubProvider } from 'dsh-github'
 import GitHubConnectService, {
+  DEFAULT_CLIENT_ID,
   defaultSleep,
   detectBaseBranch,
   detectFlowState,
@@ -488,8 +489,12 @@ describe('summarizeChecks', () => {
 
 describe('GitHubConnectService device flow', () => {
   it('requires a clientId and the credentials seam', async () => {
-    const noClient = await mountService({})
-    await expect(noClient.service.startDeviceFlow()).rejects.toThrow(expect.objectContaining({ code: 'GITHUB_CONNECT_CONFIG' }))
+    // The schema defaults clientId, so an absent one can only reach the guard
+    // through direct construction (embedders bypassing the plugin mount).
+    const bare = new Context()
+    await bare.plugin(GitHubRuntime)
+    const noClient = new GitHubConnectService(bare, {})
+    await expect(noClient.startDeviceFlow()).rejects.toThrow(expect.objectContaining({ code: 'GITHUB_CONNECT_CONFIG' }))
     const noCredentials = await mountService({ clientId: 'c1' }, { credentials: false })
     await expect(noCredentials.service.startDeviceFlow()).rejects.toThrow(expect.objectContaining({ code: 'GITHUB_CONNECT_CONFIG' }))
   })
@@ -558,6 +563,16 @@ describe('GitHubConnectService device flow', () => {
     expect(suite.service.deviceFlowStatus()?.phase).toBe('awaiting-authorization')
     await suite.service.pendingFlow
     expect(suite.service.deviceFlowStatus()?.phase).toBe('denied')
+  })
+
+  it('defaults clientId to the shared OAuth App through the config schema', async () => {
+    const ctx = new Context()
+    await ctx.plugin(GitHubRuntime)
+    await ctx.plugin(FakeCredentials)
+    ctx.github.registerProvider(makeProvider())
+    await ctx.plugin(GitHubConnectService, {})
+    expect(ctx.githubConnect.config.clientId).toBe(DEFAULT_CLIENT_ID)
+    expect(DEFAULT_CLIENT_ID).toMatch(/^Ov23li/)
   })
 
   it('aborts the active flow when the service disposes', async () => {

@@ -1,5 +1,9 @@
 # Changelog
 
+## dsh-github-connect 0.1.1 (2026-08-14)
+
+- **Zero-setup Device Flow** — `clientId` now defaults to the project's shared `dsh-github-connector` OAuth App (`DEFAULT_CLIENT_ID`, Device Flow enabled), so a fresh install connects without any configuration — the same ship-the-public-client-id pattern the GitHub CLI uses. GHES deployments still override it with an App registered on their own instance.
+
 ## dsh-ui-github 0.1.1 (2026-08-14)
 
 - **Fix: namespace access without inject** — the client half handed `ctx.remote` straight to the React surfaces, so their first `remote.githubConnect` access re-entered the cordis inject check and threw `cannot get property "remote.githubConnect" without inject` (the plugin mounts that namespace itself and must not inject it — ADR-0008). The surfaces now receive a thin face that resolves the namespace per access through inject-free `ctx.get('remote.githubConnect')`, with `$on` still riding the injected gateway service.

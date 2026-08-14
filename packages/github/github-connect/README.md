@@ -12,7 +12,7 @@ The **GitHub connect service** (`ctx.githubConnect`): everything between "the us
 
 | Field | Default | Semantics |
 |---|---|---|
-| `clientId` | — | OAuth App client id; Device Flow is unavailable without it. |
+| `clientId` | the shared `dsh-github-connector` OAuth App | Client id for the Device Flow (a public identifier, not a secret). Override on GHES with an App registered on your instance. |
 | `credentialRef` | `GITHUB_TOKEN` | Where the token is stored and resolved (credentials seam, env fallback). |
 | `apiBaseURL` / `authBaseURL` | github.com endpoints | GHES: point `apiBaseURL` at `/api/v3`, `authBaseURL` at the GHES host. |
 | `host` | `github.com` | The host a workspace remote must point at to activate flow-state. |

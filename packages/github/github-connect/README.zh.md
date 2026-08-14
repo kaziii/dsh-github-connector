@@ -12,7 +12,7 @@
 
 | 字段 | 默认值 | 语义 |
 |---|---|---|
-| `clientId` | — | OAuth App client id；缺省则 Device Flow 不可用。 |
+| `clientId` | 项目共享的 `dsh-github-connector` OAuth App | Device Flow 用的 client id（公开标识符，非密钥）。GHES 需覆盖为你实例上注册的 App。 |
 | `credentialRef` | `GITHUB_TOKEN` | token 的存取位置（凭据 seam，env 回退）。 |
 | `apiBaseURL` / `authBaseURL` | github.com 端点 | GHES：`apiBaseURL` 指向 `/api/v3`，`authBaseURL` 指向 GHES 主机。 |
 | `host` | `github.com` | 工作区 remote 必须指向的主机，flow-state 的激活门槛。 |

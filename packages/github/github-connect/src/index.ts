@@ -78,9 +78,17 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-/** Plugin config. Only `clientId` has no default; it gates the Device Flow. */
+/**
+ * The shared `dsh-github-connector` OAuth App (owned by the project, Device
+ * Flow enabled). A client id is a public identifier, not a secret — shipping
+ * it is the same zero-setup pattern the GitHub CLI uses. GHES deployments
+ * override it with an App registered on their own instance.
+ */
+export const DEFAULT_CLIENT_ID = 'Ov23likAeAslKtkPq6Vn'
+
+/** Plugin config. Every field has a default; overrides are for GHES and tests. */
 export interface GitHubConnectConfig {
-  /** GitHub OAuth App client id; Device Flow is unavailable without it. */
+  /** OAuth App client id for the Device Flow; defaults to the project's shared App. */
   clientId?: string
   /** Credential reference the token is stored under and resolved from. */
   credentialRef?: string
@@ -153,7 +161,7 @@ export class GitHubConnectService extends TypertRemoteService {
 
   /** Config schema (see {@link GitHubConnectConfig} for field semantics). */
   static Config: z<GitHubConnectConfig> = z.object({
-    clientId: z.string(),
+    clientId: z.string().default(DEFAULT_CLIENT_ID),
     credentialRef: z.string().default('GITHUB_TOKEN'),
     apiBaseURL: z.string().default('https://api.github.com'),
     authBaseURL: z.string().default('https://github.com'),
