@@ -539,12 +539,25 @@ describe('GitHubConnectService device flow', () => {
     await suite.service.startDeviceFlow()
     await firstFlow
     await suite.service.pendingFlow
-    // The aborted first flow's terminal update races the second flow's prompt;
-    // only the multiset and the terminal grant are deterministic.
-    expect(suite.deviceUpdates.map(update => update.phase).sort())
-      .toEqual(['authorized', 'awaiting-authorization', 'awaiting-authorization', 'failed'])
-    expect(suite.deviceUpdates.at(-1)!.phase).toBe('authorized')
+    // The superseded first flow's terminal update is dropped (its controller
+    // is no longer the active flow), so the sequence is deterministic and the
+    // poller never sees a stale failure (ADR-0009).
+    expect(suite.deviceUpdates.map(update => update.phase))
+      .toEqual(['awaiting-authorization', 'awaiting-authorization', 'authorized'])
+    expect(suite.service.deviceFlowStatus()?.phase).toBe('authorized')
     expect(suite.credentials.store.get('GITHUB_TOKEN')).toBe('gho_second')
+  })
+
+  it('exposes the latest progress for the settings card poller (ADR-0009)', async () => {
+    const suite = await mountService({ clientId: 'c1' })
+    expect(suite.service.deviceFlowStatus()).toBeUndefined()
+    const { fetch: fetchImpl } = scriptedFetch([DEVICE_CODE_ROUTE, tokenSequence([{ error: 'access_denied' }])])
+    suite.service.fetchImpl = fetchImpl
+    suite.service.sleep = () => Promise.resolve()
+    await suite.service.startDeviceFlow()
+    expect(suite.service.deviceFlowStatus()?.phase).toBe('awaiting-authorization')
+    await suite.service.pendingFlow
+    expect(suite.service.deviceFlowStatus()?.phase).toBe('denied')
   })
 
   it('aborts the active flow when the service disposes', async () => {

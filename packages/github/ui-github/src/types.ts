@@ -30,6 +30,7 @@ import type {
   ChecksSummary,
   CreatePrResult,
   DeviceFlowPrompt,
+  DeviceFlowUpdate,
   GitHubFlowState,
   MergeMethod,
 } from 'dsh-github-connect'
@@ -47,6 +48,7 @@ declare module '@deepseek-ai/dsh-typert-protocol/types' {
   interface TypertRemoteMap {
     'githubConnect/connectStatus': () => Promise<RemoteResult<ConnectStatus>>
     'githubConnect/startDeviceFlow': () => Promise<RemoteResult<DeviceFlowPrompt>>
+    'githubConnect/deviceFlowStatus': () => Promise<RemoteResult<DeviceFlowUpdate | undefined>>
     'githubConnect/disconnect': () => Promise<RemoteResult<void>>
     'githubConnect/createPr': (request: { title: string, body?: string, base?: string }) => Promise<RemoteResult<CreatePrResult>>
     'githubConnect/mergePr': (request: { number: number, method: MergeMethod }) => Promise<RemoteResult<{ merged: boolean, sha?: string }>>
@@ -56,9 +58,11 @@ declare module '@deepseek-ai/dsh-typert-protocol/types' {
   interface TypertRemoteNamespaceMap {
     githubConnect: TypertRemoteNamespace<'githubConnect'>
   }
+  // ADR-0009: dsh forwards only a fixed host event set to the browser, and
+  // custom events like github/flow-state are NOT in it — a wider selection
+  // here would type-check and then never fire. Everything beyond credential
+  // changes arrives by frontend-paced polling instead.
   interface TypertRemoteEventSelection {
-    'github/flow-state': true
-    'github/device-flow': true
     'credentials/updated': true
   }
 }

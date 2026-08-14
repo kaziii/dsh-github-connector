@@ -1,17 +1,19 @@
 /**
  * The conversation PR status bar (design §1/§2): mounted above the input,
- * driven by the forwarded `github/flow-state` event plus one mount-time
- * refresh, hidden for unconnected users. [Create PR] and [Merge] go straight
- * to `@Remote` methods (zero model turns); [AI review] is the one button that
- * spends a turn, through `shell.prompt`. The CI badge is polled here with
- * backoff and STOPS while the page is hidden (the host never pushes it).
+ * driven by frontend-paced `refreshFlowState` polling (ADR-0009: dsh never
+ * forwards `github/flow-state` to the browser) plus an immediate re-sync on
+ * `credentials/updated`, hidden for unconnected users. [Create PR] and
+ * [Merge] go straight to `@Remote` methods (zero model turns); [AI review] is
+ * the one button that spends a turn, through `shell.prompt`. Both the
+ * flow-state poller and the CI badge poller back off and STOP while the page
+ * is hidden.
  * @module dsh-ui-github/status-bar
  */
 
-import { createElement as h, useCallback, useEffect, useState, type ChangeEvent, type ReactElement, type ReactNode } from 'react'
+import { createElement as h, useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactElement, type ReactNode } from 'react'
 import type { ChecksSummary, GitHubFlowState, MergeMethod } from 'dsh-github-connect'
 import { catalogFor, type UiLocale } from './i18n.ts'
-import { MERGE_METHODS } from './model.ts'
+import { MERGE_METHODS, sameFlowState } from './model.ts'
 import type { GitHubUiRemote, GitHubUiShell } from './types.ts'
 
 /** CI badge poll pacing: start at `initialMs`, double to at most `maxMs`. */
@@ -35,6 +37,13 @@ export const defaultTimers: StatusBarTimers = {
 /** Default badge pacing (risk table: checks polling must not eat rate limit). */
 const DEFAULT_POLL: PollPolicy = { initialMs: 15_000, maxMs: 120_000 }
 
+/**
+ * Default flow-state pacing (ADR-0009). Slower than the badge: a state
+ * transition needs a whole git/PR round-trip host-side, and the turn-end
+ * moments it replaces are minutes apart.
+ */
+const DEFAULT_FLOW_POLL: PollPolicy = { initialMs: 30_000, maxMs: 300_000 }
+
 /** How long the merged banner stays before the bar collapses (design §1 stage 3). */
 const DEFAULT_COLLAPSE_MS = 5_000
 
@@ -44,6 +53,8 @@ export interface PrStatusBarProps {
   readonly shell: GitHubUiShell
   readonly locale?: UiLocale
   readonly poll?: PollPolicy
+  /** Flow-state poll pacing (ADR-0009), independent of the CI badge's. */
+  readonly flowPoll?: PollPolicy
   readonly collapseMs?: number
   readonly timers?: StatusBarTimers
 }
@@ -60,6 +71,7 @@ export function PrStatusBar(props: PrStatusBarProps): ReactElement | null {
   const { remote, shell } = props
   const catalog = catalogFor(props.locale ?? 'en')
   const poll = props.poll ?? DEFAULT_POLL
+  const flowPoll = props.flowPoll ?? DEFAULT_FLOW_POLL
   const collapseMs = props.collapseMs ?? DEFAULT_COLLAPSE_MS
   const timers = props.timers ?? defaultTimers
 
@@ -70,6 +82,15 @@ export function PrStatusBar(props: PrStatusBarProps): ReactElement | null {
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
 
+  // The poller compares against what is currently shown without re-running
+  // its effect on every render.
+  const stateRef = useRef(state)
+  stateRef.current = state
+  // The merged banner collapses locally while the host keeps detecting
+  // pr-merged until the branch moves on; remembering what collapsed keeps the
+  // poller from resurrecting the banner every round (ADR-0009).
+  const collapsedRef = useRef<{ branch: string, number: number } | undefined>(undefined)
+
   /** Adopt one authoritative state: clear per-state leftovers alongside. */
   const apply = useCallback((next: GitHubFlowState): void => {
     setState(next)
@@ -78,29 +99,73 @@ export function PrStatusBar(props: PrStatusBarProps): ReactElement | null {
     setCi(next.kind === 'pr-open' ? next.ci : undefined)
   }, [])
 
-  useEffect(() => {
-    const sync = (): void => {
-      void remote.githubConnect.refreshFlowState().then(result => {
-        // A failed refresh keeps the last known state: the bar must never
-        // surface infrastructure noise (design: unconnected users see nothing).
-        if (result.ok) apply(result.value)
-      })
-    }
-    sync()
-    const offState = remote.$on('github/flow-state', apply)
-    // Disconnect (or any credential change) re-derives the state through the
-    // host gate, which reads hidden without a token — the bar disappears
-    // immediately (M6 DoD).
-    const offCredentials = remote.$on('credentials/updated', sync)
-    return () => {
-      offState()
-      offCredentials()
-    }
+  /**
+   * One poll round: adopt a real transition, fold an unchanged `pr-open` into
+   * the badge only (an unchanged poll must never close a dropdown or discard
+   * a draft), and keep the last known state on failure — the bar never
+   * surfaces infrastructure noise (design: unconnected users see nothing).
+   */
+  const sync = useCallback(async (): Promise<void> => {
+    const result = await remote.githubConnect.refreshFlowState()
+    if (!result.ok) return
+    const next = result.value
+    if (next.kind === 'pr-merged'
+      && collapsedRef.current !== undefined
+      && collapsedRef.current.branch === next.branch
+      && collapsedRef.current.number === next.number) return
+    collapsedRef.current = undefined
+    if (!sameFlowState(stateRef.current, next)) apply(next)
+    else if (next.kind === 'pr-open' && next.ci !== undefined) setCi(next.ci)
   }, [remote, apply])
 
   useEffect(() => {
+    let disposed = false
+    let delay = flowPoll.initialMs
+    let handle: unknown
+    const schedule = (): void => {
+      // Paused while hidden; the visibility listener below resumes.
+      if (!shell.visibility.visible()) return
+      handle = timers.setTimeout(() => void tick(), delay)
+    }
+    const tick = async (): Promise<void> => {
+      await sync()
+      if (disposed) return
+      delay = Math.min(delay * 2, flowPoll.maxMs)
+      schedule()
+    }
+    void sync().then(() => {
+      if (!disposed) schedule()
+    })
+    const offVisibility = shell.visibility.onChange(visible => {
+      timers.clearTimeout(handle)
+      if (visible) {
+        delay = flowPoll.initialMs
+        schedule()
+      }
+    })
+    // Disconnect (or any credential change) re-derives the state through the
+    // host gate, which reads hidden without a token — the bar disappears
+    // immediately (M6 DoD).
+    const offCredentials = remote.$on('credentials/updated', () => {
+      timers.clearTimeout(handle)
+      delay = flowPoll.initialMs
+      void tick()
+    })
+    return () => {
+      disposed = true
+      timers.clearTimeout(handle)
+      offVisibility()
+      offCredentials()
+    }
+  }, [remote, shell, flowPoll, timers, sync])
+
+  useEffect(() => {
     if (state.kind !== 'pr-merged') return
-    const handle = timers.setTimeout(() => setState({ kind: 'hidden' }), collapseMs)
+    const merged = { branch: state.branch, number: state.number }
+    const handle = timers.setTimeout(() => {
+      collapsedRef.current = merged
+      setState({ kind: 'hidden' })
+    }, collapseMs)
     return () => timers.clearTimeout(handle)
   }, [state, timers, collapseMs])
 

@@ -6,7 +6,7 @@
  */
 
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
-import type { DeviceFlowUpdate } from 'dsh-github-connect'
+import type { DeviceFlowUpdate, GitHubFlowState } from 'dsh-github-connect'
 import type { UiCatalog } from './i18n.ts'
 import type { ConnectStatus } from './types.ts'
 
@@ -74,3 +74,27 @@ export function connectErrorText(view: Extract<ConnectView, { kind: 'error' }>, 
 
 /** The [Merge ▾] dropdown's strategy order (design §1). */
 export const MERGE_METHODS = Object.freeze(['squash', 'merge', 'rebase'] as const)
+
+/**
+ * Whether two flow states show the same bar (ADR-0009: the poller applies a
+ * refreshed state only on a real transition, so an unchanged poll never
+ * closes an open dropdown or discards a draft title). The CI rollup of
+ * `pr-open` is deliberately ignored — it updates in place through the badge,
+ * not by re-adopting the state.
+ * @param a - the currently shown state.
+ * @param b - the freshly polled state.
+ * @returns whether the bar should keep its current state object.
+ */
+export function sameFlowState(a: GitHubFlowState, b: GitHubFlowState): boolean {
+  if (a.kind !== b.kind) return false
+  switch (a.kind) {
+    case 'hidden':
+      return true
+    case 'pr-ready':
+      return b.kind === 'pr-ready' && a.branch === b.branch && a.base === b.base && a.aheadCount === b.aheadCount
+    case 'pr-open':
+      return b.kind === 'pr-open' && a.branch === b.branch && a.number === b.number && a.url === b.url
+    case 'pr-merged':
+      return b.kind === 'pr-merged' && a.branch === b.branch && a.number === b.number
+  }
+}

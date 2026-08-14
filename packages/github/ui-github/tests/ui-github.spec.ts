@@ -16,6 +16,7 @@ import {
   defaultTimers,
   installGitHubUi,
   reduceConnectView,
+  sameFlowState,
   type ConnectView,
   type GitHubUiRemote,
   type GitHubUiShell,
@@ -55,6 +56,7 @@ interface FakeRemote {
   readonly calls: {
     connectStatus: ReturnType<typeof vi.fn>
     startDeviceFlow: ReturnType<typeof vi.fn>
+    deviceFlowStatus: ReturnType<typeof vi.fn>
     disconnect: ReturnType<typeof vi.fn>
     createPr: ReturnType<typeof vi.fn>
     mergePr: ReturnType<typeof vi.fn>
@@ -70,6 +72,7 @@ function fakeRemote(): FakeRemote {
   const calls = {
     connectStatus: vi.fn(async () => ok({ connected: false })),
     startDeviceFlow: vi.fn(async () => ok(PROMPT)),
+    deviceFlowStatus: vi.fn(async () => ok(undefined)),
     disconnect: vi.fn(async () => ok(undefined)),
     createPr: vi.fn(async () => ok({ number: 123, created: true, head: 'feat/x', base: 'main' })),
     mergePr: vi.fn(async () => ok({ merged: true, sha: 'abc' })),
@@ -159,14 +162,18 @@ interface ManualTimers {
 
 function manualTimers(): ManualTimers {
   let sequence = 0
-  const pending = new Map<number, () => void>()
+  const pending = new Map<number, { fn: () => void, ms: number }>()
   const delays: number[] = []
   return {
     timers: {
       setTimeout: (fn, ms) => {
+        // An infinite delay never fires and never records: it is how
+        // CI-focused tests park the flow-state poller (IDLE_POLL) without
+        // polluting the delay assertions.
+        if (!Number.isFinite(ms)) return 0
         delays.push(ms)
         const id = ++sequence
-        pending.set(id, fn)
+        pending.set(id, { fn, ms })
         return id
       },
       clearTimeout: handle => void pending.delete(handle as number),
@@ -174,15 +181,19 @@ function manualTimers(): ManualTimers {
     delays,
     pendingCount: () => pending.size,
     fire: async () => {
-      const [id, fn] = [...pending.entries()][0]!
+      // Soonest first (ties: oldest), matching what real timers would run.
+      const [id, entry] = [...pending.entries()].sort((a, b) => a[1].ms - b[1].ms)[0]!
       pending.delete(id)
       await act(async () => {
-        fn()
+        entry.fn()
         await new Promise(resolve => setTimeout(resolve, 0))
       })
     },
   }
 }
+
+/** Parks a poller: never fires, never recorded by {@link manualTimers}. */
+const IDLE_POLL = { initialMs: Number.POSITIVE_INFINITY, maxMs: Number.POSITIVE_INFINITY }
 
 const roots: { root: Root, container: HTMLElement }[] = []
 
@@ -234,9 +245,15 @@ function buttonByText(container: HTMLElement, text: string): Element {
   return hit!
 }
 
-async function emitState(suite: FakeRemote, state: GitHubFlowState): Promise<void> {
+/**
+ * Drive the bar into a state through the polling path (ADR-0009): point the
+ * refresh mock at the state, then use the credentials/updated listener's
+ * immediate re-sync as the deterministic trigger.
+ */
+async function adoptState(suite: FakeRemote, state: GitHubFlowState): Promise<void> {
+  suite.calls.refreshFlowState.mockResolvedValue(ok(state))
   await act(async () => {
-    suite.emit('github/flow-state', state)
+    suite.emit('credentials/updated', 'GITHUB_TOKEN')
     await new Promise(resolve => setTimeout(resolve, 0))
   })
 }
@@ -317,12 +334,33 @@ describe('connect view model', () => {
     expect(MERGE_METHODS).toEqual(['squash', 'merge', 'rebase'])
     expect(Object.isFrozen(MERGE_METHODS)).toBe(true)
   })
+
+  it('compares flow states field by field, ignoring only the CI rollup', () => {
+    expect(sameFlowState({ kind: 'hidden' }, { kind: 'hidden' })).toBe(true)
+    expect(sameFlowState({ kind: 'hidden' }, PR_READY)).toBe(false)
+    expect(sameFlowState(PR_READY, { ...PR_READY })).toBe(true)
+    expect(sameFlowState(PR_READY, { ...PR_READY, aheadCount: 4 })).toBe(false)
+    expect(sameFlowState(PR_READY, { ...PR_READY, base: 'dev' })).toBe(false)
+    expect(sameFlowState(PR_READY, { ...PR_READY, branch: 'other' })).toBe(false)
+    expect(sameFlowState(PR_OPEN, { ...PR_OPEN, ci: 'passing' })).toBe(true)
+    expect(sameFlowState(PR_OPEN, { ...PR_OPEN, number: 124 })).toBe(false)
+    expect(sameFlowState(PR_OPEN, PR_OPEN_BARE)).toBe(false)
+    expect(sameFlowState(PR_OPEN, { ...PR_OPEN, branch: 'other' })).toBe(false)
+    expect(sameFlowState(PR_MERGED, { ...PR_MERGED })).toBe(true)
+    expect(sameFlowState(PR_MERGED, { ...PR_MERGED, number: 124 })).toBe(false)
+    expect(sameFlowState(PR_MERGED, { ...PR_MERGED, branch: 'other' })).toBe(false)
+  })
 })
 
 // —— settings section —————————————————————————————————————————————————————————
 
-function section(suite: FakeRemote, shell: FakeShell, locale?: UiLocale): ReactElement {
-  return h(ConnectGitHubSection, { remote: suite.remote, shell: shell.shell, ...locale === undefined ? {} : { locale } })
+interface SectionOptions {
+  locale?: UiLocale
+  timers?: StatusBarTimers
+}
+
+function section(suite: FakeRemote, shell: FakeShell, options: SectionOptions = {}): ReactElement {
+  return h(ConnectGitHubSection, { remote: suite.remote, shell: shell.shell, ...options })
 }
 
 describe('ConnectGitHubSection', () => {
@@ -345,28 +383,67 @@ describe('ConnectGitHubSection', () => {
     expect(anonymousContainer.textContent).toContain(catalogFor('en').connectedAnonymous)
   })
 
-  it('walks connect → waiting → authorized → connected, copying and opening the prompt', async () => {
+  it('walks connect → waiting → authorized → connected through the status poll', async () => {
     const suite = fakeRemote()
     const shell = fakeShell()
-    const container = await mount(section(suite, shell))
+    const clock = manualTimers()
+    const container = await mount(section(suite, shell, { timers: clock.timers }))
     await click(buttonByText(container, 'Connect GitHub'))
     expect(shell.copied).toEqual([PROMPT.userCode])
     expect(shell.opened).toEqual([PROMPT.verificationUri])
     expect(container.textContent).toContain(PROMPT.userCode)
+    // The poll paces at the prompt's server-dictated interval (5s).
+    expect(clock.delays).toEqual([5000])
 
-    await act(async () => {
-      suite.emit('github/device-flow', { phase: 'awaiting-authorization', prompt: PROMPT })
-      suite.emit('github/device-flow', { phase: 'slow-down', intervalSeconds: 10 })
-      await new Promise(resolve => setTimeout(resolve, 0))
-    })
+    // Nothing reported yet (undefined) keeps waiting.
+    await clock.fire()
     expect(container.textContent).toContain(PROMPT.userCode)
 
+    suite.calls.deviceFlowStatus.mockResolvedValue(ok({ phase: 'awaiting-authorization', prompt: PROMPT }))
+    await clock.fire()
+    expect(container.textContent).toContain(PROMPT.userCode)
+
+    // slow-down stretches the pacing without changing the view.
+    suite.calls.deviceFlowStatus.mockResolvedValue(ok({ phase: 'slow-down', intervalSeconds: 10 }))
+    await clock.fire()
+    expect(container.textContent).toContain(PROMPT.userCode)
+    expect(clock.delays).toEqual([5000, 5000, 5000, 10_000])
+
     suite.calls.connectStatus.mockResolvedValue(ok({ connected: true, login: 'octocat' }))
-    await act(async () => {
-      suite.emit('github/device-flow', { phase: 'authorized' })
-      await new Promise(resolve => setTimeout(resolve, 0))
-    })
+    suite.calls.deviceFlowStatus.mockResolvedValue(ok({ phase: 'authorized' }))
+    await clock.fire()
     expect(container.textContent).toContain('Connected as @octocat')
+    // Leaving the waiting view tears the poll down.
+    expect(clock.pendingCount()).toBe(0)
+  })
+
+  it('keeps waiting through a transient status-poll failure', async () => {
+    const suite = fakeRemote()
+    const clock = manualTimers()
+    const container = await mount(section(suite, fakeShell(), { timers: clock.timers }))
+    await click(buttonByText(container, 'Connect GitHub'))
+    suite.calls.deviceFlowStatus.mockResolvedValue(failed('gateway down'))
+    await clock.fire()
+    expect(container.textContent).toContain(PROMPT.userCode)
+    expect(clock.pendingCount()).toBe(1)
+  })
+
+  it('drops a status poll that lands after unmount', async () => {
+    const suite = fakeRemote()
+    let resolvePoll: (value: RemoteResult<unknown>) => void = () => {}
+    suite.calls.deviceFlowStatus.mockImplementation(() => new Promise(resolve => {
+      resolvePoll = resolve
+    }))
+    const clock = manualTimers()
+    const container = await mount(section(suite, fakeShell(), { timers: clock.timers }))
+    await click(buttonByText(container, 'Connect GitHub'))
+    await clock.fire()
+    await unmountAll()
+    resolvePoll(ok({ phase: 'authorized' }))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    // The disposed tick neither reschedules nor re-queries the status.
+    expect(clock.pendingCount()).toBe(0)
+    expect(suite.calls.connectStatus).toHaveBeenCalledTimes(1)
   })
 
   it('surfaces a startDeviceFlow refusal with a retry path', async () => {
@@ -381,19 +458,24 @@ describe('ConnectGitHubSection', () => {
     expect(container.textContent).toContain(PROMPT.userCode)
   })
 
-  it('shows denied and expired terminal phases', async () => {
+  it('reaches denied, expired, and failed terminal phases through the poll', async () => {
     const suite = fakeRemote()
-    const container = await mount(section(suite, fakeShell()))
-    await act(async () => {
-      suite.emit('github/device-flow', { phase: 'denied' })
-      await new Promise(resolve => setTimeout(resolve, 0))
-    })
+    const clock = manualTimers()
+    const container = await mount(section(suite, fakeShell(), { timers: clock.timers }))
+    await click(buttonByText(container, 'Connect GitHub'))
+    suite.calls.deviceFlowStatus.mockResolvedValue(ok({ phase: 'denied' }))
+    await clock.fire()
     expect(container.textContent).toContain(catalogFor('en').deviceDenied)
-    await act(async () => {
-      suite.emit('github/device-flow', { phase: 'expired' })
-      await new Promise(resolve => setTimeout(resolve, 0))
-    })
+
+    suite.calls.deviceFlowStatus.mockResolvedValue(ok({ phase: 'expired' }))
+    await click(buttonByText(container, 'Retry'))
+    await clock.fire()
     expect(container.textContent).toContain(catalogFor('en').deviceExpired)
+
+    suite.calls.deviceFlowStatus.mockResolvedValue(ok({ phase: 'failed', message: 'boom' }))
+    await click(buttonByText(container, 'Retry'))
+    await clock.fire()
+    expect(container.textContent).toContain('boom')
   })
 
   it('maps an errored status query to the error view', async () => {
@@ -421,11 +503,11 @@ describe('ConnectGitHubSection', () => {
     expect(container.textContent).toContain('@hubot')
   })
 
-  it('renders the zh-CN catalog and disposes listeners on unmount', async () => {
+  it('renders the zh-CN catalog and disposes the credentials listener on unmount', async () => {
     const suite = fakeRemote()
-    const container = await mount(section(suite, fakeShell(), 'zh-CN'))
+    const container = await mount(section(suite, fakeShell(), { locale: 'zh-CN' }))
     expect(container.textContent).toContain('连接 GitHub')
-    expect(suite.listenerCount()).toBe(2)
+    expect(suite.listenerCount()).toBe(1)
     await unmountAll()
     expect(suite.listenerCount()).toBe(0)
   })
@@ -436,12 +518,14 @@ describe('ConnectGitHubSection', () => {
 interface BarOptions {
   locale?: UiLocale
   poll?: { initialMs: number, maxMs: number }
+  flowPoll?: { initialMs: number, maxMs: number }
   collapseMs?: number
   timers?: StatusBarTimers
 }
 
+/** Mounts the bar with the flow poller parked unless a test drives it. */
 function bar(suite: FakeRemote, shell: FakeShell, options: BarOptions = {}): ReactElement {
-  return h(PrStatusBar, { remote: suite.remote, shell: shell.shell, ...options })
+  return h(PrStatusBar, { remote: suite.remote, shell: shell.shell, flowPoll: IDLE_POLL, ...options })
 }
 
 describe('PrStatusBar', () => {
@@ -453,15 +537,15 @@ describe('PrStatusBar', () => {
     expect(suite.calls.refreshFlowState).toHaveBeenCalledTimes(1)
     expect(container.textContent).toBe('')
 
-    await emitState(suite, PR_READY)
+    await adoptState(suite, PR_READY)
     expect(container.textContent).toContain('feat/x is ahead of main by 3 commits')
 
-    await emitState(suite, PR_OPEN)
+    await adoptState(suite, PR_OPEN)
     expect(container.querySelector('a')!.getAttribute('href')).toBe(PR_OPEN.kind === 'pr-open' ? PR_OPEN.url : '')
     expect(container.textContent).toContain('#123')
     expect(container.textContent).toContain('CI running')
 
-    await emitState(suite, PR_MERGED)
+    await adoptState(suite, PR_MERGED)
     expect(container.textContent).toContain('#123 merged')
     await clock.fire()
     expect(container.textContent).toBe('')
@@ -486,7 +570,7 @@ describe('PrStatusBar', () => {
     const shell = fakeShell()
     const clock = manualTimers()
     const container = await mount(bar(suite, shell, { poll: { initialMs: 10, maxMs: 40 }, timers: clock.timers }))
-    await emitState(suite, PR_READY)
+    await adoptState(suite, PR_READY)
 
     await click(buttonByText(container, 'Create PR'))
     await click(buttonByText(container, 'Create PR'))
@@ -504,7 +588,7 @@ describe('PrStatusBar', () => {
     const suite = fakeRemote()
     const clock = manualTimers()
     const container = await mount(bar(suite, fakeShell(), { poll: { initialMs: 10, maxMs: 40 }, timers: clock.timers }))
-    await emitState(suite, PR_READY)
+    await adoptState(suite, PR_READY)
     await click(buttonByText(container, 'Create PR'))
     await click(buttonByText(container, 'Confirm'))
     expect(suite.calls.createPr).toHaveBeenCalledWith({ title: 'feat/x' })
@@ -515,7 +599,7 @@ describe('PrStatusBar', () => {
     suite.calls.createPr.mockResolvedValue(failed('validation failed'))
     const clock = manualTimers()
     const container = await mount(bar(suite, fakeShell(), { poll: { initialMs: 10, maxMs: 40 }, timers: clock.timers }))
-    await emitState(suite, PR_READY)
+    await adoptState(suite, PR_READY)
     await click(buttonByText(container, 'Create PR'))
     await click(buttonByText(container, 'Confirm'))
     expect(container.textContent).toContain('validation failed')
@@ -529,7 +613,7 @@ describe('PrStatusBar', () => {
       .mockResolvedValue(failed('gateway down'))
     const clock = manualTimers()
     const container = await mount(bar(suite, fakeShell(), { poll: { initialMs: 10, maxMs: 40 }, timers: clock.timers }))
-    await emitState(suite, PR_READY)
+    await adoptState(suite, PR_READY)
     await click(buttonByText(container, 'Create PR'))
     await click(buttonByText(container, 'Confirm'))
     expect(suite.calls.createPr).toHaveBeenCalledTimes(1)
@@ -540,7 +624,7 @@ describe('PrStatusBar', () => {
     const suite = fakeRemote()
     const clock = manualTimers()
     const container = await mount(bar(suite, fakeShell(), { poll: { initialMs: 10, maxMs: 40 }, timers: clock.timers }))
-    await emitState(suite, PR_OPEN_BARE)
+    await adoptState(suite, PR_OPEN_BARE)
     expect(container.querySelector('a')).toBeNull()
     expect(container.textContent).toContain('#123')
     await click(buttonByText(container, 'Merge'))
@@ -551,7 +635,7 @@ describe('PrStatusBar', () => {
     const suite = fakeRemote()
     const clock = manualTimers()
     const container = await mount(bar(suite, fakeShell(), { poll: { initialMs: 10, maxMs: 25 }, timers: clock.timers }))
-    await emitState(suite, PR_OPEN_BARE)
+    await adoptState(suite, PR_OPEN_BARE)
     expect(container.textContent).not.toContain('CI')
 
     await clock.fire()
@@ -568,7 +652,7 @@ describe('PrStatusBar', () => {
     const shell = fakeShell()
     const clock = manualTimers()
     await mount(bar(suite, shell, { poll: { initialMs: 10, maxMs: 40 }, timers: clock.timers }))
-    await emitState(suite, PR_OPEN)
+    await adoptState(suite, PR_OPEN)
     await clock.fire()
     expect(clock.delays).toEqual([10, 20])
 
@@ -584,7 +668,7 @@ describe('PrStatusBar', () => {
     shell.setVisible(false)
     const clock = manualTimers()
     await mount(bar(suite, shell, { poll: { initialMs: 10, maxMs: 40 }, timers: clock.timers }))
-    await emitState(suite, PR_OPEN)
+    await adoptState(suite, PR_OPEN)
     expect(clock.pendingCount()).toBe(0)
   })
 
@@ -596,7 +680,7 @@ describe('PrStatusBar', () => {
     }))
     const clock = manualTimers()
     await mount(bar(suite, fakeShell(), { poll: { initialMs: 10, maxMs: 40 }, timers: clock.timers }))
-    await emitState(suite, PR_OPEN)
+    await adoptState(suite, PR_OPEN)
     await clock.fire()
     expect(suite.calls.prChecks).toHaveBeenCalledTimes(1)
     await unmountAll()
@@ -610,7 +694,7 @@ describe('PrStatusBar', () => {
     const shell = fakeShell()
     const clock = manualTimers()
     const container = await mount(bar(suite, shell, { poll: { initialMs: 10, maxMs: 40 }, timers: clock.timers }))
-    await emitState(suite, PR_OPEN)
+    await adoptState(suite, PR_OPEN)
     await click(buttonByText(container, 'AI review'))
     expect(shell.prompts).toEqual([catalogFor('en').reviewPrompt(123)])
   })
@@ -620,7 +704,7 @@ describe('PrStatusBar', () => {
     const shell = fakeShell()
     const clock = manualTimers()
     const container = await mount(bar(suite, shell, { poll: { initialMs: 10, maxMs: 40 }, timers: clock.timers }))
-    await emitState(suite, PR_OPEN)
+    await adoptState(suite, PR_OPEN)
 
     await click(buttonByText(container, 'Merge'))
     await click(buttonByText(container, 'Merge'))
@@ -649,7 +733,7 @@ describe('PrStatusBar', () => {
     const clock = manualTimers()
     suite.calls.mergePr.mockResolvedValueOnce(failed('blocked by branch protection'))
     const container = await mount(bar(suite, shell, { poll: { initialMs: 10, maxMs: 40 }, timers: clock.timers }))
-    await emitState(suite, PR_OPEN)
+    await adoptState(suite, PR_OPEN)
     await click(buttonByText(container, 'Merge'))
     await click(buttonByText(container, 'Rebase'))
     expect(container.textContent).toContain('blocked by branch protection')
@@ -680,15 +764,15 @@ describe('PrStatusBar', () => {
     const suite = fakeRemote()
     const clock = manualTimers()
     const container = await mount(bar(suite, fakeShell(), { locale: 'zh-CN', poll: { initialMs: 10, maxMs: 40 }, timers: clock.timers }))
-    await emitState(suite, PR_READY)
+    await adoptState(suite, PR_READY)
     expect(container.textContent).toContain('feat/x 领先 main 3 个提交')
     expect(container.textContent).toContain('创建 PR')
   })
 
   it('collapses through the real default timers', async () => {
     const suite = fakeRemote()
-    const container = await mount(bar(suite, fakeShell(), { collapseMs: 10, timers: defaultTimers }))
-    await emitState(suite, PR_MERGED)
+    const container = await mount(bar(suite, fakeShell(), { collapseMs: 10, flowPoll: { initialMs: 60_000, maxMs: 60_000 }, timers: defaultTimers }))
+    await adoptState(suite, PR_MERGED)
     expect(container.textContent).toContain('#123 merged')
     await act(async () => {
       await new Promise(resolve => setTimeout(resolve, 50))
@@ -698,9 +782,110 @@ describe('PrStatusBar', () => {
 
   it('uses the built-in defaults when no knobs are passed', async () => {
     const suite = fakeRemote()
-    const container = await mount(bar(suite, fakeShell()))
-    await emitState(suite, PR_MERGED)
+    const shell = fakeShell()
+    // Deliberately NOT the bar() helper: every default (poll, flow poll,
+    // collapse, timers) must resolve from the component itself.
+    const container = await mount(h(PrStatusBar, { remote: suite.remote, shell: shell.shell }))
+    await adoptState(suite, PR_MERGED)
     expect(container.textContent).toContain('#123 merged')
+  })
+
+  it('surfaces a state transition through the flow poller with backoff', async () => {
+    const suite = fakeRemote()
+    const clock = manualTimers()
+    const container = await mount(bar(suite, fakeShell(), {
+      flowPoll: { initialMs: 100, maxMs: 400 },
+      poll: IDLE_POLL,
+      timers: clock.timers,
+    }))
+    expect(container.textContent).toBe('')
+    expect(clock.delays).toEqual([100])
+
+    suite.calls.refreshFlowState.mockResolvedValue(ok(PR_READY))
+    await clock.fire()
+    expect(container.textContent).toContain('feat/x is ahead of main by 3 commits')
+    await clock.fire()
+    await clock.fire()
+    expect(clock.delays).toEqual([100, 200, 400, 400])
+  })
+
+  it('keeps an open draft on an unchanged poll and folds a CI change into the badge', async () => {
+    const suite = fakeRemote()
+    const clock = manualTimers()
+    const container = await mount(bar(suite, fakeShell(), {
+      flowPoll: { initialMs: 100, maxMs: 100 },
+      poll: IDLE_POLL,
+      timers: clock.timers,
+    }))
+    suite.calls.refreshFlowState.mockResolvedValue(ok(PR_READY))
+    await clock.fire()
+    await click(buttonByText(container, 'Create PR'))
+    await setValue(container.querySelector('input')!, 'feat: draft in progress')
+
+    // Same state again: the dropdown and the draft survive the poll.
+    await clock.fire()
+    expect(container.querySelector('input')!.value).toBe('feat: draft in progress')
+
+    suite.calls.refreshFlowState.mockResolvedValue(ok(PR_OPEN_BARE))
+    await clock.fire()
+    expect(container.textContent).toContain('#123')
+    expect(container.textContent).not.toContain('CI')
+
+    // Unchanged pr-open with no rollup leaves the badge alone …
+    await clock.fire()
+    expect(container.textContent).not.toContain('CI')
+    // … and an unchanged pr-open WITH a rollup updates only the badge.
+    suite.calls.refreshFlowState.mockResolvedValue(ok({ ...PR_OPEN_BARE, ci: 'passing' }))
+    await clock.fire()
+    expect(container.textContent).toContain('CI passing')
+  })
+
+  it('drops a flow poll that lands after unmount', async () => {
+    const suite = fakeRemote()
+    const clock = manualTimers()
+    await mount(bar(suite, fakeShell(), {
+      flowPoll: { initialMs: 100, maxMs: 100 },
+      poll: IDLE_POLL,
+      timers: clock.timers,
+    }))
+    let resolveRefresh: (value: RemoteResult<unknown>) => void = () => {}
+    suite.calls.refreshFlowState.mockImplementation(() => new Promise(resolve => {
+      resolveRefresh = resolve
+    }))
+    await clock.fire()
+    await unmountAll()
+    resolveRefresh(failed('late'))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(clock.pendingCount()).toBe(0)
+  })
+
+  it('does not resurrect the merged banner after it collapses', async () => {
+    const suite = fakeRemote()
+    const clock = manualTimers()
+    suite.calls.refreshFlowState.mockResolvedValue(ok(PR_MERGED))
+    const container = await mount(bar(suite, fakeShell(), {
+      flowPoll: { initialMs: 100, maxMs: 100 },
+      poll: IDLE_POLL,
+      collapseMs: 50,
+      timers: clock.timers,
+    }))
+    expect(container.textContent).toContain('#123 merged')
+
+    // The collapse (50ms) beats the next poll (100ms).
+    await clock.fire()
+    expect(container.textContent).toBe('')
+    // The host still detects pr-merged; the collapsed banner stays down.
+    await clock.fire()
+    expect(container.textContent).toBe('')
+
+    // A real transition clears the memory …
+    suite.calls.refreshFlowState.mockResolvedValue(ok(PR_READY))
+    await clock.fire()
+    expect(container.textContent).toContain('feat/x is ahead')
+    // … so a DIFFERENT merge shows its banner again.
+    suite.calls.refreshFlowState.mockResolvedValue(ok({ ...PR_MERGED, number: 124 }))
+    await clock.fire()
+    expect(container.textContent).toContain('#124 merged')
   })
 })
 
@@ -716,7 +901,7 @@ describe('installGitHubUi', () => {
     const sectionContainer = await mount(shell.slots.get('settings.section')!() as ReactElement)
     expect(sectionContainer.textContent).toContain('Connect GitHub')
     const dockContainer = await mount(shell.slots.get('conversation.input.dock')!() as ReactElement)
-    await emitState(suite, PR_MERGED)
+    await adoptState(suite, PR_MERGED)
     expect(dockContainer.textContent).toContain('#123 merged')
     await unmountAll()
 
@@ -731,13 +916,14 @@ describe('installGitHubUi', () => {
     const dispose = installGitHubUi(shell.shell, suite.remote, {
       locale: 'zh-CN',
       poll: { initialMs: 10, maxMs: 40 },
+      flowPoll: IDLE_POLL,
       collapseMs: 100,
       timers: clock.timers,
     })
     const sectionContainer = await mount(shell.slots.get('settings.section')!() as ReactElement)
     expect(sectionContainer.textContent).toContain('连接 GitHub')
     const dockContainer = await mount(shell.slots.get('conversation.input.dock')!() as ReactElement)
-    await emitState(suite, PR_MERGED)
+    await adoptState(suite, PR_MERGED)
     expect(dockContainer.textContent).toContain('#123 已合并')
     await clock.fire()
     expect(dockContainer.textContent).toBe('')

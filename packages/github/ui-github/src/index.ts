@@ -14,6 +14,7 @@ export {
   connectErrorText,
   connectViewFromStatus,
   reduceConnectView,
+  sameFlowState,
   type ConnectView,
 } from './model.ts'
 export { ConnectGitHubSection, type ConnectSectionProps } from './settings-section.ts'
