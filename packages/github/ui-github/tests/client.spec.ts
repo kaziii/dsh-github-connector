@@ -20,7 +20,7 @@ interface FakeRegistration {
 function fakeClientCtx() {
   const injected: string[] = []
   const registrations: FakeRegistration[] = []
-  const sends: { sessionId: string, text: string }[] = []
+  const sends: { sessionId: string, text: string, mode: string }[] = []
   const raw = {
     slots: {
       inject: vi.fn((key: string, callback: () => () => void) => {
@@ -37,10 +37,16 @@ function fakeClientCtx() {
         }
       }),
     },
+    // Mirrors the ISessions contract: scope resolves an opaque handle,
+    // sessionOf resolves the face behind it; either may miss.
     sessions: {
-      scope: (sessionId: string) => ({
-        conversation: { send: async (text: string) => void sends.push({ sessionId, text }) },
-      }),
+      scope: (sessionId: string) => sessionId === 'missing-scope' ? undefined : { sessionId },
+      sessionOf: (scoped: { sessionId: string }) => scoped.sessionId === 'pruned'
+        ? undefined
+        : {
+            prompt: async (content: { type: string, text: string }[], mode: string) =>
+              void sends.push({ sessionId: scoped.sessionId, text: content[0]!.text, mode }),
+          },
     },
     remote: {
       $mount: vi.fn(async () => async () => {}),
@@ -215,7 +221,8 @@ describe('createBrowserShell', () => {
     expect(shell.sessionId()).toBeUndefined()
     suite.registrations[0]!.component({ sessionId: 's1' })
     shell.prompt('review PR #1')
-    expect(suite.sends).toEqual([{ sessionId: 's1', text: 'review PR #1' }])
+    // Prompts queue a turn through the session face (never steer).
+    expect(suite.sends).toEqual([{ sessionId: 's1', text: 'review PR #1', mode: 'queue' }])
     // The same rendered-for session rides the Remote calls (ADR-0010).
     expect(shell.sessionId()).toBe('s1')
     // A sessionless render (root-scope pass) keeps the last session.
@@ -223,6 +230,19 @@ describe('createBrowserShell', () => {
     shell.prompt('again')
     expect(suite.sends).toHaveLength(2)
     expect(shell.sessionId()).toBe('s1')
+  })
+
+  it('swallows a prompt when the session scope or its face is gone', () => {
+    const suite = fakeClientCtx()
+    const shell = createBrowserShell(suite.ctx)
+    shell.registerSlot('conversation.input.dock', () => 'dock')
+    // The scope resolver misses (session no longer listed).
+    suite.registrations[0]!.component({ sessionId: 'missing-scope' })
+    shell.prompt('lost')
+    // The face resolver misses (scope pruned between renders).
+    suite.registrations[0]!.component({ sessionId: 'pruned' })
+    shell.prompt('also lost')
+    expect(suite.sends).toEqual([])
   })
 
   it('disposes a slot registration through the returned disposer', () => {

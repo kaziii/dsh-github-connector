@@ -45,7 +45,13 @@ export function createBrowserShell(ctx: Context): GitHubUiShell {
     sessionId: () => currentSession,
     prompt: text => {
       if (currentSession === undefined) return
-      void ctx.sessions.scope(currentSession).conversation.send(text)
+      // Session addressing stays inject-free: both verbs live on the injected
+      // sessions service, and the scoped context is only an opaque handle —
+      // reading a service property off it (`scoped.conversation`) would
+      // re-enter the inject check this plugin cannot satisfy (ADR-0008).
+      const scoped = ctx.sessions.scope(currentSession)
+      if (scoped === undefined) return
+      void ctx.sessions.sessionOf(scoped)?.prompt([{ type: 'text', text }], 'queue')
     },
     openExternal: url => {
       if (!/^https?:\/\//.test(url)) return

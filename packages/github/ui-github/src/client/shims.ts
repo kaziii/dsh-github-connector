@@ -42,28 +42,45 @@ export interface ClientSlotRegistry {
   inject(key: string, callback: () => () => void): () => void
 }
 
-/** `ctx.sessions.scope(id).conversation` — the send verb the [AI review] button uses. */
-export interface ClientConversation {
+/** A text prompt part — all this plugin ever sends. */
+export interface ClientPromptTextPart {
+  readonly type: 'text'
+  readonly text: string
+}
+
+/**
+ * The outward session face slice this plugin drives (`ISession`): the
+ * [AI review] and [Create PR] buttons' prompt verb.
+ */
+export interface ClientSessionFace {
   /**
-   * Send one prompt into the session as the user.
-   * @param text - the prompt text.
+   * Send a prompt into the session.
+   * @param content - the prompt parts.
+   * @param mode - `queue` appends a turn; `steer` interrupts the running one.
    */
-  send(text: string): Promise<unknown>
+  prompt(content: readonly ClientPromptTextPart[], mode: 'queue' | 'steer'): Promise<unknown>
 }
 
-/** One session-addressed service scope. */
-export interface ClientSessionScope {
-  readonly conversation: ClientConversation
-}
-
-/** `ctx.sessions` — the dsh client session addressing service. */
+/**
+ * `ctx.sessions` — the dsh client session addressing service (`ISessions`
+ * slice). Both verbs live on this already-injected service; the scoped
+ * context stays an opaque handle — property-accessing services on it would
+ * re-enter the inject check this plugin cannot satisfy (same rule as
+ * ADR-0008's remote namespace).
+ */
 export interface ClientSessions {
   /**
-   * Address one session's scoped services.
+   * Resolve one session's Agent-scoped context.
    * @param sessionId - the target session.
-   * @returns the session's scope.
+   * @returns the scoped context, or undefined for an unknown session.
    */
-  scope(sessionId: string): ClientSessionScope
+  scope(sessionId: string): object | undefined
+  /**
+   * Resolve the session face behind an Agent-scoped context.
+   * @param ctx - a context returned by {@link scope}.
+   * @returns the face, or undefined when the scope was pruned.
+   */
+  sessionOf(ctx: object): ClientSessionFace | undefined
 }
 
 declare module '@deepseek-ai/cordis' {
