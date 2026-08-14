@@ -13,6 +13,7 @@ import { installGitHubUi } from '../install.ts'
 import type { GitHubUiRemote } from '../types.ts'
 import { GITHUB_CONNECT_REMOTE } from './contribution.ts'
 import { createBrowserShell } from './shell.ts'
+import { installStyles } from './styles.ts'
 import type {} from './shims.ts'
 
 /** Cordis client plugin name. */
@@ -48,5 +49,6 @@ export async function apply(ctx: Context): Promise<void> {
     },
     $on: (event, listener) => ctx.remote.$on(event, listener),
   }
+  ctx.effect(() => installStyles(), 'ui-github.styles')
   ctx.effect(() => installGitHubUi(shell, remote, { locale }), 'ui-github.install')
 }

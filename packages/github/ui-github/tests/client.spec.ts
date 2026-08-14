@@ -8,6 +8,7 @@ import type { GitHubUiRemote } from '../src/types.ts'
 import { GITHUB_CONNECT_REMOTE } from '../src/client/contribution.ts'
 import { apply, detectLocale, inject, name } from '../src/client/index.ts'
 import { createBrowserShell } from '../src/client/shell.ts'
+import { STYLE_MARKER, STYLE_TEXT, installStyles } from '../src/client/styles.ts'
 
 // —— fakes ————————————————————————————————————————————————————————————————————
 
@@ -75,6 +76,7 @@ describe('GITHUB_CONNECT_REMOTE', () => {
       'disconnect',
       'mergePr',
       'prChecks',
+      'prDraft',
       'refreshFlowState',
       'startDeviceFlow',
     ])
@@ -123,6 +125,14 @@ describe('GITHUB_CONNECT_REMOTE', () => {
     expect(parse(undefined)).toBeUndefined()
     expect(parse(null)).toBeUndefined()
     expect(() => parse({})).toThrow(TypeError)
+  })
+
+  it('gates the PR draft on a string title', () => {
+    const parse = parseOf(descriptor('prDraft').result)
+    const draft = { title: 'feat: x', body: '- a\n- b' }
+    expect(parse(draft)).toBe(draft)
+    expect(() => parse({ title: 5 })).toThrow(TypeError)
+    expect(() => parse('feat: x')).toThrow(TypeError)
   })
 
   it('gates the createPr and mergePr requests on their required fields', () => {
@@ -233,6 +243,27 @@ describe('createBrowserShell', () => {
   })
 })
 
+// —— stylesheet ———————————————————————————————————————————————————————————————
+
+describe('installStyles', () => {
+  it('installs once per document and removes on dispose', () => {
+    const doc = document.implementation.createHTMLDocument()
+    const off = installStyles(doc)
+    const style = doc.head.querySelector(`style[${STYLE_MARKER}]`)
+    expect(style).not.toBeNull()
+    expect(style!.textContent).toBe(STYLE_TEXT)
+
+    // A second install is a no-op whose disposer removes nothing.
+    const noop = installStyles(doc)
+    expect(doc.head.querySelectorAll('style')).toHaveLength(1)
+    noop()
+    expect(doc.head.querySelector(`style[${STYLE_MARKER}]`)).not.toBeNull()
+
+    off()
+    expect(doc.head.querySelector(`style[${STYLE_MARKER}]`)).toBeNull()
+  })
+})
+
 // —— plugin entry —————————————————————————————————————————————————————————————
 
 describe('client apply', () => {
@@ -264,8 +295,14 @@ describe('client apply', () => {
     const dock = suite.registrations[1]!.component({}) as ReactElement<{ locale: string }>
     expect(dock.type).toBe(PrStatusBar)
 
+    // The stylesheet is the first effect; its disposer removes the element.
+    expect(document.head.querySelector('style[data-dsh-ui-github]')).not.toBeNull()
+    const disposeStyles = suite.raw.effect.mock.results[0]!.value as () => void
+    disposeStyles()
+    expect(document.head.querySelector('style[data-dsh-ui-github]')).toBeNull()
+
     // The install is an effect: its disposer unregisters both surfaces.
-    const dispose = suite.raw.effect.mock.results[0]!.value as () => void
+    const dispose = suite.raw.effect.mock.results[1]!.value as () => void
     dispose()
     expect(suite.registrations).toHaveLength(0)
     document.documentElement.lang = ''

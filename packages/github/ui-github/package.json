@@ -1,7 +1,7 @@
 {
   "name": "dsh-ui-github",
   "description": "GitHub workflow UI for the DeepSeek Harness web client — the Connect GitHub settings section and the conversation PR status bar (create / AI-review / merge), driven entirely by dsh-github-connect's @Remote methods and forwarded events, bound to the client shell through a narrow injected port",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/kaziii/dsh-github-connector.git",

@@ -81,6 +81,10 @@ export function PrStatusBar(props: PrStatusBarProps): ReactElement | null {
   const [menu, setMenu] = useState<OpenMenu>('none')
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
+  const [drafting, setDrafting] = useState(false)
+  // Which branch the panel was last prefilled for: the host draft is fetched
+  // once per branch, and never overwrites what the user already edited.
+  const draftedRef = useRef<string | undefined>(undefined)
 
   // The poller compares against what is currently shown without re-running
   // its effect on every render.
@@ -202,6 +206,25 @@ export function PrStatusBar(props: PrStatusBarProps): ReactElement | null {
     }
   }, [state, remote, shell, poll, timers])
 
+  const openCreate = useCallback(async (branch: string): Promise<void> => {
+    if (menu === 'create') {
+      setMenu('none')
+      return
+    }
+    setMenu('create')
+    if (draftedRef.current === branch) return
+    draftedRef.current = branch
+    setDrafting(true)
+    const result = await remote.githubConnect.prDraft()
+    setDrafting(false)
+    // Prefill only (design §6): a failed draft leaves the editable fields
+    // empty rather than surfacing infrastructure noise.
+    if (result.ok) {
+      setTitle(result.value.title)
+      setBody(result.value.body ?? '')
+    }
+  }, [menu, remote])
+
   const createPr = useCallback(async (branch: string): Promise<void> => {
     const trimmedTitle = title.trim()
     const trimmedBody = body.trim()
@@ -237,22 +260,36 @@ export function PrStatusBar(props: PrStatusBarProps): ReactElement | null {
     case 'pr-ready': {
       const branch = state.branch
       parts.push(
-        h('span', { key: 'ahead' }, catalog.aheadOfBase(state.branch, state.base, state.aheadCount)),
-        h('button', { key: 'create', onClick: () => setMenu(menu === 'create' ? 'none' : 'create') }, catalog.createPrButton),
+        h('span', { key: 'ahead', className: 'gh-flow-text' }, catalog.aheadOfBase(state.branch, state.base, state.aheadCount)),
+        h('span', { key: 'spacer', className: 'gh-spacer' }),
+        h('button', {
+          key: 'create',
+          className: 'gh-btn gh-btn-primary',
+          onClick: () => void openCreate(branch),
+        }, catalog.createPrButton),
       )
       if (menu === 'create') {
-        parts.push(h('div', { key: 'create-menu', className: 'gh-create-menu' },
+        parts.push(h('div', { key: 'create-menu', className: 'gh-menu gh-create-menu' },
           h('input', {
+            className: 'gh-input',
             value: title,
-            placeholder: catalog.prTitlePlaceholder,
+            disabled: drafting,
+            placeholder: drafting ? catalog.draftGenerating : catalog.prTitlePlaceholder,
             onChange: (event: ChangeEvent<HTMLInputElement>) => setTitle(event.target.value),
           }),
           h('textarea', {
+            className: 'gh-textarea',
             value: body,
-            placeholder: catalog.prBodyPlaceholder,
+            disabled: drafting,
+            placeholder: drafting ? catalog.draftGenerating : catalog.prBodyPlaceholder,
             onChange: (event: ChangeEvent<HTMLTextAreaElement>) => setBody(event.target.value),
           }),
-          h('button', { onClick: () => void createPr(branch) }, catalog.confirmCreateButton),
+          h('div', { className: 'gh-menu-actions' },
+            h('button', {
+              className: 'gh-btn gh-btn-primary',
+              disabled: drafting,
+              onClick: () => void createPr(branch),
+            }, catalog.confirmCreateButton)),
         ))
       }
       break
@@ -262,26 +299,27 @@ export function PrStatusBar(props: PrStatusBarProps): ReactElement | null {
       const url = state.url
       parts.push(
         url === undefined
-          ? h('span', { key: 'pr' }, catalog.openPr(number))
-          : h('a', { key: 'pr', href: url, target: '_blank', rel: 'noreferrer' }, catalog.openPr(number)),
+          ? h('span', { key: 'pr', className: 'gh-flow-text' }, catalog.openPr(number))
+          : h('a', { key: 'pr', className: 'gh-pr-link', href: url, target: '_blank', rel: 'noreferrer' }, catalog.openPr(number)),
       )
-      if (ci !== undefined) parts.push(h('span', { key: 'ci', className: `gh-ci-${ci}` }, catalog.ciBadge(ci)))
+      if (ci !== undefined) parts.push(h('span', { key: 'ci', className: `gh-ci gh-ci-${ci}` }, catalog.ciBadge(ci)))
       parts.push(
-        h('button', { key: 'review', onClick: () => shell.prompt(catalog.reviewPrompt(number)) }, catalog.reviewButton),
-        h('button', { key: 'merge', onClick: () => setMenu(menu === 'merge' ? 'none' : 'merge') }, catalog.mergeButton),
+        h('span', { key: 'spacer', className: 'gh-spacer' }),
+        h('button', { key: 'review', className: 'gh-btn', onClick: () => shell.prompt(catalog.reviewPrompt(number)) }, catalog.reviewButton),
+        h('button', { key: 'merge', className: 'gh-btn', onClick: () => setMenu(menu === 'merge' ? 'none' : 'merge') }, catalog.mergeButton),
       )
       if (menu === 'merge') {
         const items: ReactNode[] = MERGE_METHODS.map(method =>
-          h('button', { key: method, onClick: () => void merge(number, method) }, catalog.mergeMethodLabel(method)))
+          h('button', { key: method, className: 'gh-menu-item', onClick: () => void merge(number, method) }, catalog.mergeMethodLabel(method)))
         if (url !== undefined) {
-          items.push(h('button', { key: 'open', onClick: () => shell.openExternal(url) }, catalog.openOnGitHub))
+          items.push(h('button', { key: 'open', className: 'gh-menu-item', onClick: () => shell.openExternal(url) }, catalog.openOnGitHub))
         }
-        parts.push(h('div', { key: 'merge-menu', className: 'gh-merge-menu' }, ...items))
+        parts.push(h('div', { key: 'merge-menu', className: 'gh-menu gh-merge-menu' }, ...items))
       }
       break
     }
     case 'pr-merged':
-      parts.push(h('span', { key: 'merged' }, catalog.mergedBanner(state.number)))
+      parts.push(h('span', { key: 'merged', className: 'gh-flow-text gh-merged' }, catalog.mergedBanner(state.number)))
       break
   }
   if (notice !== undefined) parts.push(h('span', { key: 'notice', className: 'gh-notice' }, notice))

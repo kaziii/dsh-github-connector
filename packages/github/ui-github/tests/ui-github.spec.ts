@@ -59,6 +59,7 @@ interface FakeRemote {
     startDeviceFlow: ReturnType<typeof vi.fn>
     deviceFlowStatus: ReturnType<typeof vi.fn>
     disconnect: ReturnType<typeof vi.fn>
+    prDraft: ReturnType<typeof vi.fn>
     createPr: ReturnType<typeof vi.fn>
     mergePr: ReturnType<typeof vi.fn>
     prChecks: ReturnType<typeof vi.fn>
@@ -75,6 +76,7 @@ function fakeRemote(): FakeRemote {
     startDeviceFlow: vi.fn(async () => ok(PROMPT)),
     deviceFlowStatus: vi.fn(async () => ok(undefined)),
     disconnect: vi.fn(async () => ok(undefined)),
+    prDraft: vi.fn(async () => ok({ title: 'feat: draft title', body: 'Draft body.' })),
     createPr: vi.fn(async () => ok({ number: 123, created: true, head: 'feat/x', base: 'main' })),
     mergePr: vi.fn(async () => ok({ merged: true, sha: 'abc' })),
     prChecks: vi.fn(async () => ok('passing')),
@@ -280,7 +282,11 @@ describe('catalogs', () => {
       expect(catalog.createPrButton).not.toBe('')
       expect(catalog.prTitlePlaceholder).not.toBe('')
       expect(catalog.prBodyPlaceholder).not.toBe('')
+      expect(catalog.draftGenerating).not.toBe('')
       expect(catalog.confirmCreateButton).not.toBe('')
+      expect(catalog.connectDescription).not.toBe('')
+      expect(catalog.waitingHint).not.toBe('')
+      expect(catalog.openAuthPage).not.toBe('')
       expect(catalog.openPr(123)).toBe('#123')
       expect(catalog.ciBadge('pending')).not.toBe('')
       expect(catalog.ciBadge('passing')).not.toBe('')
@@ -395,6 +401,10 @@ describe('ConnectGitHubSection', () => {
     expect(container.textContent).toContain(PROMPT.userCode)
     // The poll paces at the prompt's server-dictated interval (5s).
     expect(clock.delays).toEqual([5000])
+
+    // The waiting card can reopen the authorization page.
+    await click(buttonByText(container, catalogFor('en').openAuthPage))
+    expect(shell.opened).toEqual([PROMPT.verificationUri, PROMPT.verificationUri])
 
     // Nothing reported yet (undefined) keeps waiting.
     await clock.fire()
@@ -577,21 +587,58 @@ describe('PrStatusBar', () => {
     await click(buttonByText(container, 'Create PR'))
     expect(container.querySelector('input')).toBeNull()
     await click(buttonByText(container, 'Create PR'))
+    // Reopening never refetches the draft for the same branch.
+    expect(suite.calls.prDraft).toHaveBeenCalledTimes(1)
     await setValue(container.querySelector('input')!, 'feat: add x')
     await setValue(container.querySelector('textarea')!, 'Adds x end to end.')
     suite.calls.refreshFlowState.mockResolvedValue(ok(PR_OPEN))
-    await click(buttonByText(container, 'Confirm'))
+    await click(buttonByText(container, 'Create pull request'))
     expect(suite.calls.createPr).toHaveBeenCalledWith({ title: 'feat: add x', body: 'Adds x end to end.' })
     expect(container.textContent).toContain('#123')
   })
 
-  it('falls back to the branch name as the title and omits an empty body', async () => {
+  it('prefills the form from the host draft (design §6)', async () => {
     const suite = fakeRemote()
     const clock = manualTimers()
     const container = await mount(bar(suite, fakeShell(), { poll: { initialMs: 10, maxMs: 40 }, timers: clock.timers }))
     await adoptState(suite, PR_READY)
     await click(buttonByText(container, 'Create PR'))
-    await click(buttonByText(container, 'Confirm'))
+    expect(container.querySelector('input')!.value).toBe('feat: draft title')
+    expect(container.querySelector('textarea')!.value).toBe('Draft body.')
+    await click(buttonByText(container, 'Create pull request'))
+    expect(suite.calls.createPr).toHaveBeenCalledWith({ title: 'feat: draft title', body: 'Draft body.' })
+  })
+
+  it('disables the form while drafting and tolerates a bodyless draft', async () => {
+    const suite = fakeRemote()
+    let resolveDraft: (value: RemoteResult<unknown>) => void = () => {}
+    suite.calls.prDraft.mockImplementation(() => new Promise(resolve => {
+      resolveDraft = resolve
+    }))
+    const clock = manualTimers()
+    const container = await mount(bar(suite, fakeShell(), { poll: { initialMs: 10, maxMs: 40 }, timers: clock.timers }))
+    await adoptState(suite, PR_READY)
+    await click(buttonByText(container, 'Create PR'))
+    const input = container.querySelector('input')!
+    expect(input.disabled).toBe(true)
+    expect(input.placeholder).toBe(catalogFor('en').draftGenerating)
+    await act(async () => {
+      resolveDraft(ok({ title: 'feat: solo commit' }))
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
+    expect(input.disabled).toBe(false)
+    expect(input.value).toBe('feat: solo commit')
+    expect(container.querySelector('textarea')!.value).toBe('')
+  })
+
+  it('falls back to the branch name as the title when the draft fails', async () => {
+    const suite = fakeRemote()
+    suite.calls.prDraft.mockResolvedValue(failed('no commits'))
+    const clock = manualTimers()
+    const container = await mount(bar(suite, fakeShell(), { poll: { initialMs: 10, maxMs: 40 }, timers: clock.timers }))
+    await adoptState(suite, PR_READY)
+    await click(buttonByText(container, 'Create PR'))
+    await click(buttonByText(container, 'Create pull request'))
     expect(suite.calls.createPr).toHaveBeenCalledWith({ title: 'feat/x' })
   })
 
@@ -602,7 +649,7 @@ describe('PrStatusBar', () => {
     const container = await mount(bar(suite, fakeShell(), { poll: { initialMs: 10, maxMs: 40 }, timers: clock.timers }))
     await adoptState(suite, PR_READY)
     await click(buttonByText(container, 'Create PR'))
-    await click(buttonByText(container, 'Confirm'))
+    await click(buttonByText(container, 'Create pull request'))
     expect(container.textContent).toContain('validation failed')
     expect(container.textContent).toContain('feat/x is ahead of main')
   })
@@ -616,7 +663,7 @@ describe('PrStatusBar', () => {
     const container = await mount(bar(suite, fakeShell(), { poll: { initialMs: 10, maxMs: 40 }, timers: clock.timers }))
     await adoptState(suite, PR_READY)
     await click(buttonByText(container, 'Create PR'))
-    await click(buttonByText(container, 'Confirm'))
+    await click(buttonByText(container, 'Create pull request'))
     expect(suite.calls.createPr).toHaveBeenCalledTimes(1)
     expect(container.textContent).toContain('feat/x is ahead of main')
   })

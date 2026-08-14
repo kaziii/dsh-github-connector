@@ -33,6 +33,7 @@ import type {
   DeviceFlowUpdate,
   GitHubFlowState,
   MergeMethod,
+  PrDraft,
 } from 'dsh-github-connect'
 import type {} from '@deepseek-ai/dsh-credentials'
 
@@ -50,6 +51,7 @@ declare module '@deepseek-ai/dsh-typert-protocol/types' {
     'githubConnect/startDeviceFlow': () => Promise<RemoteResult<DeviceFlowPrompt>>
     'githubConnect/deviceFlowStatus': () => Promise<RemoteResult<DeviceFlowUpdate | undefined>>
     'githubConnect/disconnect': () => Promise<RemoteResult<void>>
+    'githubConnect/prDraft': () => Promise<RemoteResult<PrDraft>>
     'githubConnect/createPr': (request: { title: string, body?: string, base?: string }) => Promise<RemoteResult<CreatePrResult>>
     'githubConnect/mergePr': (request: { number: number, method: MergeMethod }) => Promise<RemoteResult<{ merged: boolean, sha?: string }>>
     'githubConnect/prChecks': (number: number) => Promise<RemoteResult<ChecksSummary | undefined>>

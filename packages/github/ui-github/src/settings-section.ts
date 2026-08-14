@@ -110,19 +110,32 @@ export function ConnectGitHubSection(props: ConnectSectionProps): ReactElement {
 
   switch (view.kind) {
     case 'loading':
-      return h('div', { className: 'gh-connect' }, catalog.connectLoading)
+      return h('div', { className: 'gh-connect' },
+        h('span', { className: 'gh-connect-hint' }, catalog.connectLoading))
     case 'disconnected':
       return h('div', { className: 'gh-connect' },
-        h('button', { onClick: () => void connect() }, catalog.connectButton))
+        h('div', { className: 'gh-connect-row' },
+          h('button', { className: 'gh-btn gh-btn-primary', onClick: () => void connect() }, catalog.connectButton)),
+        h('p', { className: 'gh-connect-hint' }, catalog.connectDescription))
     case 'waiting':
-      return h('div', { className: 'gh-connect' }, catalog.waitingForAuthorization(view.userCode))
+      return h('div', { className: 'gh-connect' },
+        h('div', { className: 'gh-connect-row' },
+          h('code', { className: 'gh-user-code' }, view.userCode),
+          h('button', { className: 'gh-btn', onClick: () => shell.openExternal(view.verificationUri) }, catalog.openAuthPage)),
+        h('p', { className: 'gh-connect-hint' }, catalog.waitingHint))
     case 'connected':
       return h('div', { className: 'gh-connect' },
-        h('span', null, view.login === undefined ? catalog.connectedAnonymous : catalog.connectedAs(view.login)),
-        h('button', { onClick: () => void disconnect() }, catalog.disconnectButton))
+        h('div', { className: 'gh-connect-row' },
+          h('span', { className: 'gh-connect-dot' }),
+          h('span', { className: 'gh-connect-login' },
+            view.login === undefined ? catalog.connectedAnonymous : catalog.connectedAs(view.login)),
+          h('span', { className: 'gh-spacer' }),
+          h('button', { className: 'gh-btn', onClick: () => void disconnect() }, catalog.disconnectButton)))
     case 'error':
       return h('div', { className: 'gh-connect' },
-        h('span', null, connectErrorText(view, catalog)),
-        h('button', { onClick: () => void connect() }, catalog.retryButton))
+        h('div', { className: 'gh-connect-row' },
+          h('span', { className: 'gh-notice' }, connectErrorText(view, catalog)),
+          h('span', { className: 'gh-spacer' }),
+          h('button', { className: 'gh-btn', onClick: () => void connect() }, catalog.retryButton)))
   }
 }

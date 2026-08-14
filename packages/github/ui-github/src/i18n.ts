@@ -17,7 +17,10 @@ export interface UiCatalog {
   readonly connectedAs: (login: string) => string
   readonly connectedAnonymous: string
   readonly disconnectButton: string
+  readonly connectDescription: string
   readonly waitingForAuthorization: (userCode: string) => string
+  readonly waitingHint: string
+  readonly openAuthPage: string
   readonly deviceExpired: string
   readonly deviceDenied: string
   readonly deviceFailed: (message: string) => string
@@ -26,6 +29,7 @@ export interface UiCatalog {
   readonly createPrButton: string
   readonly prTitlePlaceholder: string
   readonly prBodyPlaceholder: string
+  readonly draftGenerating: string
   readonly confirmCreateButton: string
   readonly openPr: (number: number) => string
   readonly ciBadge: (summary: ChecksSummary) => string
@@ -45,7 +49,10 @@ const EN: UiCatalog = Object.freeze<UiCatalog>({
   connectedAs: login => `Connected as @${login}`,
   connectedAnonymous: 'Connected',
   disconnectButton: 'Disconnect',
+  connectDescription: 'Authorize once with GitHub Device Flow — the token stays on the host and never touches a config file.',
   waitingForAuthorization: userCode => `Enter code ${userCode} on GitHub to finish connecting (copied to clipboard)`,
+  waitingHint: 'Enter this code on the GitHub authorization page (copied to clipboard)',
+  openAuthPage: 'Open authorization page',
   deviceExpired: 'The authorization code expired before it was used',
   deviceDenied: 'The authorization request was denied on GitHub',
   deviceFailed: message => `Connecting to GitHub failed: ${message}`,
@@ -54,7 +61,8 @@ const EN: UiCatalog = Object.freeze<UiCatalog>({
   createPrButton: 'Create PR',
   prTitlePlaceholder: 'PR title',
   prBodyPlaceholder: 'PR description (optional)',
-  confirmCreateButton: 'Confirm',
+  draftGenerating: 'Drafting the title and description…',
+  confirmCreateButton: 'Create pull request',
   openPr: number => `#${number}`,
   ciBadge: summary => {
     switch (summary) {
@@ -85,7 +93,10 @@ const ZH_CN: UiCatalog = Object.freeze<UiCatalog>({
   connectedAs: login => `已连接 @${login}`,
   connectedAnonymous: '已连接',
   disconnectButton: '断开连接',
+  connectDescription: '通过 GitHub Device Flow 一键授权——token 只保存在宿主，不落入任何配置文件。',
   waitingForAuthorization: userCode => `在 GitHub 输入代码 ${userCode} 完成连接（已复制到剪贴板）`,
+  waitingHint: '在 GitHub 授权页输入此代码完成连接（已复制到剪贴板）',
+  openAuthPage: '打开授权页',
   deviceExpired: '授权码在使用前已过期',
   deviceDenied: '授权请求在 GitHub 上被拒绝',
   deviceFailed: message => `连接 GitHub 失败：${message}`,
@@ -94,7 +105,8 @@ const ZH_CN: UiCatalog = Object.freeze<UiCatalog>({
   createPrButton: '创建 PR',
   prTitlePlaceholder: 'PR 标题',
   prBodyPlaceholder: 'PR 描述（可选）',
-  confirmCreateButton: '确认',
+  draftGenerating: '正在生成标题与描述…',
+  confirmCreateButton: '创建 Pull Request',
   openPr: number => `#${number}`,
   ciBadge: summary => {
     switch (summary) {

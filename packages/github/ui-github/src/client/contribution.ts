@@ -88,6 +88,11 @@ export const GITHUB_CONNECT_REMOTE: TypertRemoteContribution = {
     query('startDeviceFlow', strict('dsh-github-connect#DeviceFlowPrompt', parseObject('the device flow prompt'))),
     query('deviceFlowStatus', strict('dsh-github-connect#DeviceFlowUpdate?', parseMaybeObject('the device flow update'))),
     query('disconnect', strict('dsh-ui-github#Void', parseVoid)),
+    query('prDraft', strict('dsh-github-connect#PrDraft', value => {
+      const draft = parseObject('the PR draft')(value) as { title?: unknown }
+      if (typeof draft.title !== 'string') throw new TypeError('the PR draft needs a string title')
+      return draft
+    })),
     command(
       'createPr',
       {
