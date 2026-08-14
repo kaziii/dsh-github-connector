@@ -1,6 +1,6 @@
 # dsh GitHub 连接器 — 执行计划
 
-> 状态：M1–M7 全部完成（v1 已实现，见根 [CHANGELOG.md](../../CHANGELOG.md)）。dsh 宿主 CLI（`@deepseek-ai/dsh`）已验证可安装并激活本连接器（`dsh.bundle` patch，见 M3 验收注记）；仅剩两项手工验收挂起：M3 的模型驱动 CLI 走查（只差真实 API key）与 M6 的端到端 UI 脚本（待客户端外壳适配，已写入 [PR #5](https://github.com/kaziii/dsh-github-connector/pull/5) 描述；对接方式见 [ADR-0007](../adr/0007-ui-binds-client-shell-via-port.md)）。依据 [design.md](../design/design.md) 拆解为可直接开工的里程碑与任务清单，设计取舍的理由见 [ADR](../adr/README.md)。
+> 状态：M1–M7 全部完成（v1 已实现，见根 [CHANGELOG.md](../../CHANGELOG.md)）。dsh 宿主 CLI（`@deepseek-ai/dsh`）已验证可安装并激活本连接器（`dsh.bundle` patch，见 M3 验收注记）；仅剩两项手工验收挂起：M3 的模型驱动 CLI 走查（只差真实 API key）与 M6 的端到端 UI 脚本（dsh 源码核实后绑定路径已定：连接入口为"插件配置"卡片、端口映射见 [ADR-0008](../adr/0008-settings-card-entry-and-real-slot-binding.md) 与 design §7，待 client 适配层落地后执行；脚本已写入 [PR #5](https://github.com/kaziii/dsh-github-connector/pull/5) 描述）。依据 [design.md](../design/design.md) 拆解为可直接开工的里程碑与任务清单，设计取舍的理由见 [ADR](../adr/README.md)。
 > 原则：每个里程碑结束时**产物独立可用、可测、可合并**；严格按依赖顺序推进，不并行开新面。
 
 ## 0. 总览
@@ -12,7 +12,7 @@
 | M3 | 只读工具三件套 | `dsh-tool-github`（search / issue_read / pr_read） | **CLI 用户配 `GITHUB_TOKEN` 即可用** |
 | M4 | 写工具 + 审批 | issue_create / issue_comment / pr_create | 模型可代用户写 GitHub |
 | M5 | `dsh-github-connect` | Device Flow 授权 + flow-state 检测 + `@Remote` 方法 | 一键连接（后端就绪） |
-| M6 | `dsh-ui-github` | 设置区块 + 输入框上方 PR 状态条 | **完整产品体验** |
+| M6 | `dsh-ui-github` | 连接卡片 + 输入框上方 PR 状态条 | **完整产品体验** |
 | M7 | 收尾 | catalog 登记、文档 gate、examples | 可发布 |
 
 依赖链：M1 → M2 → M3 → M4；M5 依赖 M1/M2（不依赖 M3/M4）；M6 依赖 M5；M7 依赖全部。
@@ -147,7 +147,7 @@ M5 可与 M3/M4 并行（如有人力），但默认串行推进。
 
 ### 任务
 
-1. 设置页 "Connect GitHub" 区块（注册 `settings.section` slot）：
+1. GitHub 连接卡片（注册 `settings.plugin.item` slot，落在"插件 → 插件配置"页，ADR-0008；实现时以 `GitHubUiShell` 端口的 `settings.section` 名义开发，适配层收窄为卡片）：
    - 未连接：[Connect GitHub] 按钮 → `window.open` 授权页 + user_code 自动复制 + 等待态
    - 已连接：`已连接 @用户名` + [断开]
 2. PR 状态条（注册 `conversation.input.dock` slot），三阶段 UI 照 design §1：
@@ -162,7 +162,7 @@ M5 可与 M3/M4 并行（如有人力），但默认串行推进。
 
 - [x] 组件测试：四态渲染 + 事件驱动迁移
 - [x] 断开连接后状态条立即消失
-- [ ] **端到端手工验收脚本**（写进 PR 描述）：连接 → agent 提交 → 状态条出现 → 创建 PR → CI 徽章 → AI 审查 → merge → 收起（待 dsh 宿主环境与客户端外壳适配可用后执行，见 ADR-0007 后果）
+- [ ] **端到端手工验收脚本**（写进 PR 描述）：连接 → agent 提交 → 状态条出现 → 创建 PR → CI 徽章 → AI 审查 → merge → 收起（绑定路径已由 ADR-0008 确定：`./client` 半侧适配层 + `settings.plugin.item` 卡片 + `ctx.remote.$mount`；待适配层落地后执行，首步先验证外部 `$mount` 可行性）
 
 ---
 
