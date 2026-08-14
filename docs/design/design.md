@@ -43,7 +43,7 @@ PR 已合并                      →  确认后收起
 | `dsh-github-rest` | packages/github/github-rest（host） | **Provider**：fetch 直调 REST v3（不引 octokit）、credential-ref 鉴权、`baseURL` 支持 GHES、`installSettingsSection` 接入用户设置 |
 | `dsh-tool-github` | packages/github/tool-github（agent preset） | **Consumer**：`ctx.tools.register(defineTool(...))` 注册模型工具，`write` 开关 |
 | `dsh-github-connect` | host | Device Flow 授权 + git flow-state 检测 + `@Remote` 方法（`createPr` / `mergePr` / `connectStatus`）供前端按钮直调 |
-| `dsh-ui-github` | client（React） | 设置页 "Connect GitHub" 区块（注册 `settings.section` slot）+ 输入框上方 PR 状态条（注册 `conversation.input.dock` slot） |
+| `dsh-ui-github` | client（React） | "插件 → 插件配置"页 GitHub 连接卡片（注册 `settings.plugin.item` slot，ADR-0008）+ 输入框上方 PR 状态条（注册 `conversation.input.dock` slot） |
 
 组合分层：Service Definition + Provider 进 host 组合（bundle patch），tool 进 agent preset —— 与 dsh web 家族"服务在宿主、工具在 preset"一致。
 
@@ -88,9 +88,24 @@ CLI/headless 路径保持可用：直接配 `GITHUB_TOKEN` 环境变量或 `.cre
 - `ctx.credentials.set/resolve` + `credentials/updated` 事件转发白名单
 - `ctx.tools.register(defineTool)` + `presentCall/presentResult`（纯函数，session 回放要求）
 - `tools/pre-execute` 审批流 + `ApprovalPanel`（写操作确认）
-- client slot 系统：`settings.section`、`conversation.input.dock`、`tool.call.toolview`
+- client slot 系统：`settings.plugin.item`（连接卡片，ADR-0008）、`conversation.input.dock`、`tool.call.toolview`
 - Typert Remote（`@Remote` 方法，前端直调宿主）；全栈模板：`packages/feedback/message-feedback`
 - `sessions.prompt`（按钮触发模型回合）
+
+`GitHubUiShell` 端口（ADR-0007）→ dsh 真实 API 映射（源码核实于 `D:\deepseek-harness`，ADR-0008）：
+
+| 端口成员 | dsh 真实落点 |
+|---|---|
+| `registerSlot('settings.section')` | `ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({ name, id: 'github', locale, inject }, Card))`（入口收窄为卡片） |
+| `registerSlot('conversation.input.dock')` | 同上，`name: 'conversation.input.dock'`；模板 `packages/client/ui-goal/src/client/index.ts` |
+| `prompt(text)` | `ctx.sessions.scope(sessionId).conversation.send(text)` |
+| `copyText(text)` | `writeClipboard` / `useCopyFeedback`（`@deepseek-ai/dsh-client-ui-primitives`） |
+| `confirmIrreversible(question)` | `RiskConfirmation` 组件（强制勾选确认，同包） |
+| `openExternal(url)` | 无命令式服务；组件渲染安全锚点 `<a target="_blank" rel="noopener noreferrer">`（仅 http(s)），端口成员在适配落地时收敛 |
+| `visibility` | 浏览器 `document.visibilitychange`（适配层自持） |
+| Typert Remote 客户端面 | 宿主 `TypertRemoteService` + `@Remote()` 生成 `./remote` 构件；client 半侧 `ctx.remote.$mount` 自行挂载（若外部挂载被阻断，回退为向 dsh 主仓提 PR 进 `packages/api/remotes` 挂载列表，ADR-0008 决策 4） |
+
+client 半侧形态：package.json `exports["./client"]` + `dsh.client.{inject, platform:"web"}` 双向一致，node 半侧空 `apply`；client 包间禁止 value import，跨插件走 cordis service。token 只走 credentials 域，不进 apiproxy `WEB_SETTINGS_NAMESPACES` 白名单。
 
 已知约束：
 
@@ -113,7 +128,7 @@ CLI/headless 路径保持可用：直接配 `GITHUB_TOKEN` 环境变量或 `.cre
 3. 只读工具三件套 + snapshot 测试（此时 CLI 用户已可用）
 4. 写工具 + 审批联动
 5. `dsh-github-connect`：Device Flow + flow-state 检测
-6. `dsh-ui-github`：设置区块 + PR 状态条
+6. `dsh-ui-github`：连接卡片 + PR 状态条
 7. 收尾：catalog 登记、文档 gate、examples 叶子
 
 ## 10. 未纳入 v1
