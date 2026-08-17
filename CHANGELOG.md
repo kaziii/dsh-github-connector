@@ -10,6 +10,13 @@
 
 ## Unreleased
 
+M9 — `github_pr_review` (ADR-0013), replacing the one-line "review this PR" prompt with a task that has a known shape:
+
+- **Deterministic dimension routing** — `classifyFile` / `changedLines` / `routeDimensions` in the seam decide which of the six axes (correctness, tests, error-handling, types, comments, simplification) this particular change warrants. Keyword probes read only `+`/`-` lines, never context, so a `catch` the author merely scrolled past cannot route a whole review through error handling. A docs-only PR is never asked about type design. Routing earns its keep by *excluding* what would arrive empty, not by distributing axes evenly.
+- **One diff, N dimensions** — `GitHubReviewBrief` carries the diff exactly once and each dimension references its `paths`. Six axes over one diff cost one diff. The severity vocabulary and the finding contract are likewise global, not repeated per axis.
+- **Evidence, not verdict** — the tool ships no score and no opinion. What it guarantees is coverage and output shape: every finding must carry a `path:line`, one severity from a fixed scale, and what/why/proposed-change. The judgement stays the model's.
+- **Status bar wiring** — the [AI review] button's prompt now routes through the tool and explicitly does *not* ask for the review to be submitted to GitHub; that stays the user's next word (ADR-0014).
+
 M8 — the read half of the v2 review loop (ADR-0012), so the model can act on review feedback and on CI failures instead of merely observing that they exist:
 
 - **Review reads** — `getReviews` / `getReviewComments` on the seam and provider, plus `github_pr_read part=reviews`. Line-anchored review comments come from `/pulls/{n}/comments`, which v1 never touched: it only read the issue-level thread, so everything reviewers wrote *on the code* was invisible. `GitHubReviewComment` stays a separate type from `GitHubComment` — it carries a path and a line, and you act on it by editing that code. An outdated comment (line gone) renders with its diff hunk, the only anchor it has left. Thread `resolved` state is absent by design: GraphQL-only, still out of scope.

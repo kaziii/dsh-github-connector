@@ -29,7 +29,7 @@ const dispose = installGitHubUi(shellAdapter, typertClientRemote, { locale: 'zh-
 
 ## 测试
 
-组件测试在 jsdom 下用脚本化的假 Remote 与假外壳驱动：四个流状态经轮询的渲染与迁移、断开连接后状态条立即消失、Device Flow 全程（等待 → 授权 → 已连接，以及拒绝 / 过期 / 失败）、退避与暂停节奏、未变化轮次下草稿的存活、合并横幅的收起记忆、两个下拉菜单，以及 client 半侧（contribution codec、浏览器外壳、插件 apply）。100% per-file 覆盖率，无需任何 token。
+组件测试在 jsdom 下用脚本化的假 Remote 与假外壳驱动：四个流状态经轮询的渲染与迁移、断开连接后状态条立即消失、Device Flow 全程（等待 → 授权 → 已连接，以及拒绝 / 过期 / 失败）、退避与暂停节奏、agent 驱动的创建（prompt 派发、loading 保持、超时）、[×] 的忽略记忆、未变化轮次下菜单的存活、合并横幅的收起记忆、diff 统计胶囊，以及 client 半侧（contribution codec、浏览器外壳、插件 apply）。100% per-file 覆盖率，无需任何 token。
 
 ## Model Experience
 

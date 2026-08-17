@@ -15,7 +15,9 @@ import * as toolGitHub from 'dsh-tool-github'
 import {
   formatChecks,
   formatCiFailures,
+  formatReviewBrief,
   formatReviews,
+  type ReviewBriefValue,
   formatComments,
   formatDiff,
   formatSearchOutput,
@@ -573,6 +575,123 @@ describe('github_pr_read', () => {
       // truncated=true — the seam lifts that upward, so the note appears anyway.
       '(Evidence truncated by budget. Open the run on GitHub for the full log.)',
     ].join('\n'))
+  })
+})
+
+describe('github_pr_review (M9)', () => {
+  it('assembles the review task: diff once, routed dimensions, severity, contract', async () => {
+    const budgets: unknown[] = []
+    const suite = await mountSuite({ reviewMaxFiles: 7, reviewMaxPatchChars: 700 }, {
+      provider: {
+        getDiff: (_item, request) => {
+          budgets.push(request)
+          return Promise.resolve({
+            files: [
+              { path: 'src/a.ts', status: 'modified' as const, additions: 2, deletions: 1, patch: '+try { go() } catch (e) {}' },
+              { path: 'src/a.test.ts', status: 'added' as const, additions: 5, deletions: 0, patch: '+expect(go()).toBe(1)' },
+            ],
+            truncated: false,
+          })
+        },
+      },
+    })
+    const rendered = ok(await suite.run('github_pr_review', { repo: 'octo/hello-world', number: 5 }))
+
+    expect(budgets[0]).toEqual({ maxFiles: 7, maxPatchChars: 700 })
+    expect(rendered).toContain('## Review task: octo/hello-world#5')
+    expect(rendered).toContain('## Dimensions (4 apply)')
+    expect(rendered).toContain('### error-handling')
+    expect(rendered).toContain('Applies because: 1 test file(s) changed. Files: src/a.test.ts, src/a.ts')
+    expect(rendered).toContain('- **blocker** —')
+    expect(rendered).toContain('## Report every finding like this')
+    // The one hunk is printed once, in the diff section — not repeated per dimension.
+    expect(rendered.split('+try { go() } catch (e) {}')).toHaveLength(2)
+  })
+
+  it('passes a caller dimension restriction through to the seam', async () => {
+    const suite = await mountSuite()
+    const rendered = ok(await suite.run('github_pr_review', {
+      repo: 'octo/hello-world',
+      number: 5,
+      dimensions: ['correctness'],
+    }))
+    expect(rendered).toContain('## Dimensions (1 apply)')
+    expect(rendered).toContain('### correctness')
+    expect(rendered).not.toContain('### simplification')
+  })
+
+  it('says there is nothing to review rather than inventing dimensions', async () => {
+    const suite = await mountSuite({}, {
+      provider: {
+        getDiff: () => Promise.resolve({
+          files: [{ path: 'assets/logo.png', status: 'modified' as const, additions: 0, deletions: 0 }],
+          truncated: false,
+        }),
+      },
+    })
+    const rendered = ok(await suite.run('github_pr_review', { repo: 'octo/hello-world', number: 5 }))
+    expect(rendered).toContain('Nothing routable changed')
+    expect(rendered).not.toContain('## Dimensions (')
+  })
+
+  it('warns that a truncated diff makes the review knowingly partial, and carries draft state', async () => {
+    const suite = await mountSuite({}, {
+      provider: {
+        getPullRequest: ref => Promise.resolve({
+          ref, title: 'WIP', state: 'open' as const, baseRef: 'main', headRef: 'feat/x', draft: true,
+        }),
+        getDiff: () => Promise.resolve({
+          files: [{ path: 'src/a.ts', status: 'modified' as const, additions: 1, deletions: 0, patch: '+const a = 1' }],
+          truncated: true,
+        }),
+      },
+    })
+    const rendered = ok(await suite.run('github_pr_review', { repo: 'octo/hello-world', number: 5 }))
+    expect(rendered).toContain('knowingly partial')
+    expect(rendered).toContain('State: open (draft)')
+  })
+
+  it('registers as a read tool, present included, and survives write: false', async () => {
+    const suite = await mountSuite({ write: false })
+    const definition = suite.ctx.tools.get('github_pr_review')!
+    expect(definition).toBeDefined()
+    expect(definition.isConcurrencySafe!({ repo: 'o/r', number: 5 })).toBe(true)
+    expect(definition.presentCall!({ repo: 'o/r', number: 5 }))
+      .toMatchObject({ title: 'Assemble review of GitHub PR o/r#5', kind: 'read' })
+  })
+
+  it('rejects a non-positive PR number before reaching the seam', async () => {
+    const suite = await mountSuite()
+    const result = await suite.run('github_pr_review', { repo: 'octo/hello-world', number: 0 })
+    expect(result.isError).toBe(true)
+  })
+
+  it('omits every absent optional field of a bare pull request', async () => {
+    const suite = await mountSuite({}, {
+      provider: {
+        getPullRequest: ref => Promise.resolve({ ref, title: 'Bare', state: 'open' as const, baseRef: 'main', headRef: 'feat/x' }),
+        getDiff: () => Promise.resolve({
+          files: [{ path: 'src/a.ts', status: 'modified' as const, additions: 1, deletions: 0, patch: '+const a = 1' }],
+          truncated: false,
+        }),
+      },
+    })
+    const rendered = ok(await suite.run('github_pr_review', { repo: 'octo/hello-world', number: 5 }))
+    expect(rendered).toContain('### octo/hello-world#5: Bare')
+    expect(rendered).toContain('(no description)')
+    expect(rendered).not.toContain('Author:')
+  })
+
+  it('renders a pathless dimension as covering the whole diff', () => {
+    const brief: ReviewBriefValue = {
+      pullRequest: { repo: 'o/r', number: 1, title: 'T', state: 'open', headRef: 'h', baseRef: 'b' },
+      diff: { files: [], truncated: false },
+      dimensions: [{ dimension: 'correctness', reason: 'everything changed', paths: [], checklist: ['Does it work?'] }],
+      severityScale: [{ level: 'blocker', meaning: 'stop' }],
+      outputContract: ['point at a line'],
+      truncated: false,
+    }
+    expect(formatReviewBrief(brief)).toContain('Applies because: everything changed. Files: the whole diff')
   })
 })
 

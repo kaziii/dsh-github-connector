@@ -30,15 +30,19 @@ import type {
   GitHubPullRequestCreateResult,
   GitHubRepoRef,
   GitHubReview,
+  GitHubReviewBrief,
+  GitHubReviewBriefRequest,
   GitHubReviewComment,
   GitHubSearchRequest,
   GitHubSearchResult,
 } from './types.ts'
 import { GitHubError } from './types.ts'
+import { buildReviewBrief } from './review.ts'
 
 export {
   GitHubError,
 } from './types.ts'
+export { buildReviewBrief, changedLines, classifyFile, routeDimensions, type GitHubFileKind } from './review.ts'
 export type {
   GitHubAnnotationLevel,
   GitHubCheckAnnotation,
@@ -68,7 +72,13 @@ export type {
   GitHubPullRequestState,
   GitHubRepoRef,
   GitHubReview,
+  GitHubReviewBrief,
+  GitHubReviewBriefRequest,
   GitHubReviewComment,
+  GitHubReviewDimension,
+  GitHubReviewDimensionBrief,
+  GitHubReviewSeverity,
+  GitHubReviewSeverityLevel,
   GitHubReviewSide,
   GitHubReviewState,
   GitHubSearchItem,
@@ -209,6 +219,30 @@ export class GitHubRuntime extends Service {
     assertPositiveInteger('maxPatchChars', request.maxPatchChars)
     const diff = await this.resolveProvider().getDiff(item, request, signal)
     return applyDiffBudget(diff, request)
+  }
+
+  /**
+   * Assemble a structured review brief: the pull request, its budgeted diff,
+   * the dimensions that DETERMINISTICALLY apply to it, and the checklists,
+   * severity scale, and output contract a review must satisfy (ADR-0013).
+   *
+   * The seam routes and packages evidence; it never judges. The diff is carried
+   * once and dimensions reference its paths, so N dimensions cost one diff.
+   * @param item - the pull request handle.
+   * @param request - consumer-owned diff budgets plus an optional dimension restriction.
+   * @param signal - optional cancellation signal forwarded to the provider.
+   * @returns the brief, `truncated` when its diff was reduced.
+   */
+  async buildReviewBrief(
+    item: GitHubItemRef,
+    request: GitHubReviewBriefRequest = {},
+    signal?: AbortSignal,
+  ): Promise<GitHubReviewBrief> {
+    assertItemRef(item)
+    const provider = this.resolveProvider()
+    const pullRequest = await provider.getPullRequest(item, signal)
+    const diff = await this.getDiff(item, request, signal)
+    return buildReviewBrief(pullRequest, diff, request)
   }
 
   /**

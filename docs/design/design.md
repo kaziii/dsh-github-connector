@@ -1,6 +1,6 @@
 # dsh GitHub 连接器 — 设计文档
 
-> 状态：v1（M1–M7）已实现；v2「审查闭环」（范围决策见 [ADR-0012](../adr/0012-pr-review-loop-enters-scope.md)）：M8（审查读侧）已实现，M9/M10 设计定稿、未开工。本文档是与 dsh 仓库调研结论一起沉淀的完整方案，随实现演进；客户端外壳的对接方式见 [ADR-0007](../adr/0007-ui-binds-client-shell-via-port.md)，依赖 dsh 宿主环境的两项手工验收仍挂起（见[执行计划](../plans/execution-plan.md) M3/M6）。
+> 状态：v1（M1–M7）已实现；v2「审查闭环」（范围决策见 [ADR-0012](../adr/0012-pr-review-loop-enters-scope.md)）：M8（审查读侧）与 M9（结构化审查）已实现，M10 设计定稿、未开工。本文档是与 dsh 仓库调研结论一起沉淀的完整方案，随实现演进；客户端外壳的对接方式见 [ADR-0007](../adr/0007-ui-binds-client-shell-via-port.md)，依赖 dsh 宿主环境的两项手工验收仍挂起（见[执行计划](../plans/execution-plan.md) M3/M6）。
 > 实施拆解见[执行计划](../plans/execution-plan.md)；关键取舍的决策记录见 [ADR](../adr/README.md)。
 
 ## 1. 目标与产品体验
@@ -76,12 +76,14 @@ PR 已合并                      →  确认后收起
 
 > `resolved` / 线程折叠状态只有 GraphQL 有，REST 拿不到；v2 不提供该字段（GraphQL 仍在 §10 排除项内）。
 
-**编排侧（M9）**
+**编排侧（M9，已实现）**
 
 - `GitHubReviewDimension = 'correctness' | 'tests' | 'error-handling' | 'types' | 'comments' | 'simplification'`（闭合联合，消费端 `switch + assertNever`）
-- `GitHubReviewBrief { dimensions: readonly GitHubReviewDimensionBrief[], truncated }`，每个 `GitHubReviewDimensionBrief { dimension, checklist, evidence, severityScale }`
-- 维度路由（哪些维度适用于本 PR）是**确定性规则**，由改动文件路径与 diff 特征推导，放在宿主；判断归模型（[ADR-0013](../adr/0013-structured-review-as-evidence-orchestrator.md)）
-- 预算独立于 `github_pr_read`，不复用其默认值
+- `GitHubReviewBrief { pullRequest, diff, dimensions, severityScale, outputContract, truncated }`，每个 `GitHubReviewDimensionBrief { dimension, reason, paths, checklist }`
+- **diff 只在 brief 里出现一次**，维度用 `paths` 引用它而不复制 patch —— 六个维度覆盖一份 diff 必须只花一份 diff 的 token。严重度口径与输出契约同理，全局各一份而非每维度重复
+- 维度路由（哪些维度适用于本 PR）是**确定性规则**，由改动文件路径与 diff 变更行特征推导（只看 `+`/`-` 行，不看上下文行），放在宿主；判断归模型（[ADR-0013](../adr/0013-structured-review-as-evidence-orchestrator.md)）
+- 落地名：seam 上是 `buildReviewBrief(item, request)`；纯函数 `classifyFile` / `changedLines` / `routeDimensions` 单独导出，无需 provider 即可测
+- 预算独立于 `github_pr_read`（`reviewMaxFiles` / `reviewMaxPatchChars` = `60` / `120000`），不复用其默认值
 
 **写侧（M10）**
 
@@ -112,7 +114,7 @@ CLI/headless 路径保持可用：直接配 `GITHUB_TOKEN` 环境变量或 `.cre
 | Merge | `ctx.remote.github.mergePr`，接现有审批面板做不可逆确认 | 否 |
 | AI 审查 | `sessions.prompt("审查 PR #N …")`，正常 agent 回合 | 是（这正是目的） |
 
-v2 后 [AI 审查] 的 prompt 改为引导模型调用 `github_pr_review`（ADR-0013），按钮通路本身不变 —— 仍是 `shell.prompt`，不新增直连宿主的路径。该 prompt **不引导模型提交 review**：产出停在会话里，是否回写 GitHub 由用户下一句话决定（ADR-0014）。状态条自审场景永远拿不到 `APPROVE` —— GitHub 禁止批准自己创建的 PR。
+M9 起 [AI 审查] 的 prompt 已改为引导模型调用 `github_pr_review`（ADR-0013），按钮通路本身不变 —— 仍是 `shell.prompt`，不新增直连宿主的路径。该 prompt **不引导模型提交 review**：产出停在会话里，是否回写 GitHub 由用户下一句话决定（ADR-0014）。状态条自审场景永远拿不到 `APPROVE` —— GitHub 禁止批准自己创建的 PR。
 
 ## 7. dsh 基建依赖清单（调研结论）
 

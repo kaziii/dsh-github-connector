@@ -72,7 +72,10 @@ const EN: UiCatalog = Object.freeze<UiCatalog>({
     }
   },
   reviewButton: 'AI review',
-  reviewPrompt: number => `Review PR #${number}: read its diff and checks, then summarize risks and needed changes.`,
+  // Routes the turn through github_pr_review (ADR-0013) rather than leaving the
+  // model to improvise over a raw diff. Deliberately does NOT ask for the review
+  // to be submitted to GitHub — that stays the user's next word (ADR-0014).
+  reviewPrompt: number => `Review PR #${number}. Call github_pr_review to get the dimensions that apply and the contract your findings must satisfy, then report the findings here. Do not submit anything to GitHub.`,
   mergeButton: 'Merge',
   mergeMethodLabel: method => {
     switch (method) {
@@ -116,7 +119,7 @@ const ZH_CN: UiCatalog = Object.freeze<UiCatalog>({
     }
   },
   reviewButton: 'AI 审查',
-  reviewPrompt: number => `审查 PR #${number}：阅读其 diff 与检查结果，总结风险与需要的修改。`,
+  reviewPrompt: number => `审查 PR #${number}。先调用 github_pr_review 拿到适用的维度与 findings 必须满足的契约，然后在此汇报 findings。不要向 GitHub 提交任何内容。`,
   mergeButton: 'Merge',
   mergeMethodLabel: method => {
     switch (method) {

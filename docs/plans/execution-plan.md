@@ -1,6 +1,6 @@
 # dsh GitHub 连接器 — 执行计划
 
-> 状态：v1（M1–M7）全部完成（见根 [CHANGELOG.md](../../CHANGELOG.md)）；v2「审查闭环」（范围决策见 [ADR-0012](../adr/0012-pr-review-loop-enters-scope.md)）：**M8 已完成**（审查读侧），M9/M10 已拆解、未开工。dsh 宿主 CLI（`@deepseek-ai/dsh`）已验证可安装并激活本连接器（`dsh.bundle` patch，见 M3 验收注记）；仅剩两项手工验收挂起：M3 的模型驱动 CLI 走查（只差真实 API key）与 M6 的端到端 UI 脚本（dsh 源码核实后绑定路径已定：连接入口为"插件配置"卡片、端口映射见 [ADR-0008](../adr/0008-settings-card-entry-and-real-slot-binding.md) 与 design §7，待 client 适配层落地后执行；脚本已写入 [PR #5](https://github.com/kaziii/dsh-github-connector/pull/5) 描述）。依据 [design.md](../design/design.md) 拆解为可直接开工的里程碑与任务清单，设计取舍的理由见 [ADR](../adr/README.md)。
+> 状态：v1（M1–M7）全部完成（见根 [CHANGELOG.md](../../CHANGELOG.md)）；v2「审查闭环」（范围决策见 [ADR-0012](../adr/0012-pr-review-loop-enters-scope.md)）：**M8（审查读侧）与 M9（结构化审查）已完成**，M10 已拆解、未开工。dsh 宿主 CLI（`@deepseek-ai/dsh`）已验证可安装并激活本连接器（`dsh.bundle` patch，见 M3 验收注记）；仅剩两项手工验收挂起：M3 的模型驱动 CLI 走查（只差真实 API key）与 M6 的端到端 UI 脚本（dsh 源码核实后绑定路径已定：连接入口为"插件配置"卡片、端口映射见 [ADR-0008](../adr/0008-settings-card-entry-and-real-slot-binding.md) 与 design §7，待 client 适配层落地后执行；脚本已写入 [PR #5](https://github.com/kaziii/dsh-github-connector/pull/5) 描述）。依据 [design.md](../design/design.md) 拆解为可直接开工的里程碑与任务清单，设计取舍的理由见 [ADR](../adr/README.md)。
 > 原则：每个里程碑结束时**产物独立可用、可测、可合并**；严格按依赖顺序推进，不并行开新面。
 
 ## 0. 总览
@@ -234,12 +234,18 @@ ADR-0015「后果」段设想 check-run → workflow job 的关联走 `GET /acti
 
 ### 验收（DoD）
 
-- [ ] 维度路由单测：给定文件清单 → 期望维度集合（含全命中、全不命中、单维度三类）
-- [ ] 证据包不重复全量 diff 的断言（同一 hunk 不出现在两个维度的证据里，除非规则明确要求）
-- [ ] 超预算 PR fixture 上 `truncated: true` 且提示模型可缩小范围
-- [ ] 工具 present 输出 snapshot；`switch + assertNever` 覆盖全部维度
-- [ ] REAL-composition：preset + seam + fake provider 跑通一次完整 brief
-- [ ] i18n 配对哈希一致；`pnpm gate:catalog` 通过
+- [x] 维度路由单测：给定文件清单 → 期望维度集合（含全命中、全不命中、单维度三类）
+- [x] 证据包不重复全量 diff 的断言（brief 持有 diff 的**同一引用**，维度只列 paths；渲染层断言同一 hunk 只出现一次）
+- [x] 超预算 PR fixture 上 `truncated: true` 且提示模型该审查"知情地不完整"
+- [x] 工具 present 输出 snapshot；维度联合在 seam 与工具两侧都是闭合集合
+- [x] REAL-composition：preset + seam + fake provider 跑通一次完整 brief
+- [x] i18n 配对哈希一致；`pnpm gate:catalog` 通过
+
+### 实现注记（与 ADR-0013 措辞的偏差）
+
+ADR-0013 举的路由例子是"没改测试就不发 `tests` 维度的空壳任务"。实现时按其**意图**（不下发空壳）而非字面执行：`tests` 维度在**有任何可执行代码改动**时就适用——要么审新测试的质量，要么追问"这处改动为什么不需要测试"。后者恰恰是测试审查最有价值的产出，按字面规则会被丢掉。真正被剔除的是纯文档 PR：它既不发 `tests`，也不发 `types` / `correctness` / `simplification`。
+
+同理，`correctness` 与 `simplification` 搭任何代码改动都适用。路由的价值在于**剔除**不相关维度，而非把六个维度平均分配——这一点在 `routeDimensions` 的文档注释里也写明了。
 
 ## M10 — 审查回写 + PR 生命周期
 
