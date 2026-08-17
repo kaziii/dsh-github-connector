@@ -305,6 +305,7 @@ describe('catalogs', () => {
       expect(catalog.openOnGitHub).not.toBe('')
       expect(catalog.mergeConfirm(123, 'Squash')).toContain('#123')
       expect(catalog.mergeFailed('boom')).toContain('boom')
+      expect(catalog.mergeBlocked(['conflicts', 'required review'])).toContain('conflicts')
       expect(catalog.mergedBanner(123)).toContain('#123')
     }
     expect(catalogFor('zh-CN').connectButton).toBe('连接 GitHub')
@@ -784,6 +785,38 @@ describe('PrStatusBar', () => {
     await click(buttonByText(container, 'Rebase'))
     expect(suite.calls.mergePr).toHaveBeenCalledTimes(2)
     expect(container.textContent).toContain('#123')
+  })
+
+  it('shows the host\'s merge blockers in place instead of a bare failure (M10)', async () => {
+    const suite = fakeRemote()
+    const shell = fakeShell()
+    const clock = manualTimers()
+    // The host refuses locally: the call SUCCEEDS, carrying the reasons.
+    suite.calls.mergePr.mockResolvedValueOnce(ok({
+      merged: false,
+      blockedBy: ['the branch has conflicts with its base'],
+    }))
+    const container = await mount(bar(suite, shell, { poll: { initialMs: 10, maxMs: 40 }, timers: clock.timers }))
+    await adoptState(suite, PR_OPEN)
+    // Poll refreshes are ongoing; compare against the count at the click.
+    const before = suite.calls.refreshFlowState.mock.calls.length
+    await click(buttonByText(container, 'Merge'))
+    await click(buttonByText(container, 'Squash'))
+    expect(container.textContent).toContain('the branch has conflicts with its base')
+    // A refused merge must not trigger the post-merge refresh.
+    expect(suite.calls.refreshFlowState.mock.calls.length).toBe(before)
+  })
+
+  it('treats an unmerged reply with no blockers as an ordinary outcome', async () => {
+    const suite = fakeRemote()
+    const clock = manualTimers()
+    suite.calls.mergePr.mockResolvedValueOnce(ok({ merged: false }))
+    const container = await mount(bar(suite, fakeShell(), { poll: { initialMs: 10, maxMs: 40 }, timers: clock.timers }))
+    await adoptState(suite, PR_OPEN)
+    const before = suite.calls.refreshFlowState.mock.calls.length
+    await click(buttonByText(container, 'Merge'))
+    await click(buttonByText(container, 'Squash'))
+    expect(suite.calls.refreshFlowState.mock.calls.length).toBeGreaterThan(before)
   })
 
   it('disappears immediately after disconnect (credentials/updated → hidden)', async () => {

@@ -85,6 +85,12 @@ function makeProvider(id: string, usable: boolean, overrides: Partial<GitHubProv
     getReviews: () => Promise.resolve([review(`review:${id}`)]),
     getReviewComments: () => Promise.resolve([reviewComment(`review-comment:${id}`)]),
     getCheckFailures: () => Promise.resolve({ failures: [], truncated: false }),
+    getMergeability: () => Promise.resolve({ mergeable: true, state: 'clean' as const, blockedBy: [] }),
+    listPullRequests: request => Promise.resolve([pullRequest({ repo: request.repo, number: 1 }, `listed:${id}`)]),
+    submitReview: request => Promise.resolve({ ...review(`submitted:${id}`), state: request.event === 'APPROVE' ? 'approved' as const : 'commented' as const }),
+    updatePullRequest: request => Promise.resolve(pullRequest(request.item, `updated:${id}`)),
+    requestReviewers: () => Promise.resolve(),
+    setLabels: request => Promise.resolve([...request.labels]),
     createIssue: request => Promise.resolve(issue({ repo: request.repo, number: 7 }, `created:${id}`)),
     createComment: () => Promise.resolve(comment(9)),
     createPullRequest: request => Promise.resolve({
@@ -456,6 +462,67 @@ describe('GitHubRuntime buildReviewBrief operation', () => {
     github.registerProvider(makeProvider('rest', available))
     const brief = await github.buildReviewBrief(item())
     expect(brief.diff).toEqual({ files: [diffFile('a.ts', '+a')], truncated: false })
+  })
+})
+
+describe('GitHubRuntime review-write and lifecycle operations (M10)', () => {
+  it('walks every new operation through one registered provider', async () => {
+    const { github } = await mountGitHub()
+    github.registerProvider(makeProvider('rest', available))
+
+    await expect(github.getMergeability(item())).resolves.toEqual({ mergeable: true, state: 'clean', blockedBy: [] })
+    await expect(github.listPullRequests({ repo: repo() })).resolves.toMatchObject([{ title: 'listed:rest' }])
+    await expect(github.submitReview({ item: item(), event: 'COMMENT', body: 'looks fine' })).resolves.toMatchObject({ state: 'commented' })
+    await expect(github.updatePullRequest({ item: item(), title: 'new' })).resolves.toMatchObject({ title: 'updated:rest' })
+    await expect(github.requestReviewers({ item: item(), reviewers: ['alice'] })).resolves.toBeUndefined()
+    await expect(github.setLabels({ item: item(), labels: ['bug'] })).resolves.toEqual(['bug'])
+  })
+
+  it('caps a pull request listing at the seam, like search', async () => {
+    const { github } = await mountGitHub()
+    github.registerProvider(makeProvider('rest', available, {
+      listPullRequests: request => Promise.resolve(
+        Array.from({ length: 5 }, (_, index) => pullRequest({ repo: request.repo, number: index + 1 })),
+      ),
+    }))
+    await expect(github.listPullRequests({ repo: repo(), maxResults: 2 })).resolves.toHaveLength(2)
+    await expect(github.listPullRequests({ repo: repo() })).resolves.toHaveLength(5)
+  })
+
+  it.each([
+    ['a blank inline comment path', { path: '  ', line: 3, body: 'x' }],
+    ['a zero line', { path: 'src/a.ts', line: 0, body: 'x' }],
+    ['a fractional line', { path: 'src/a.ts', line: 1.5, body: 'x' }],
+  ])('rejects %s as GITHUB_VALIDATION before reaching GitHub', async (_label, comment) => {
+    const { github } = await mountGitHub()
+    github.registerProvider(makeProvider('rest', available))
+    await expect(github.submitReview({ item: item(), event: 'COMMENT', comments: [comment] }))
+      .rejects.toThrow(expect.objectContaining({ code: 'GITHUB_VALIDATION' }))
+  })
+
+  it.each([
+    ['getMergeability', (github: GitHubRuntime) => github.getMergeability(item(0))],
+    ['submitReview', (github: GitHubRuntime) => github.submitReview({ item: item(0), event: 'COMMENT' })],
+    ['updatePullRequest', (github: GitHubRuntime) => github.updatePullRequest({ item: item(0), title: 't' })],
+    ['requestReviewers', (github: GitHubRuntime) => github.requestReviewers({ item: item(0) })],
+    ['setLabels', (github: GitHubRuntime) => github.setLabels({ item: item(0), labels: [] })],
+  ])('validates the item ref of %s', async (_label, call) => {
+    const { github } = await mountGitHub()
+    github.registerProvider(makeProvider('rest', available))
+    await expect(call(github)).rejects.toThrow(expect.objectContaining({ code: 'GITHUB_VALIDATION' }))
+  })
+
+  it('validates the repo ref and result bound of a listing', async () => {
+    const { github } = await mountGitHub()
+    github.registerProvider(makeProvider('rest', available))
+    await expect(github.listPullRequests({ repo: repo({ owner: '' }) })).rejects.toThrow(expect.objectContaining({ code: 'GITHUB_VALIDATION' }))
+    await expect(github.listPullRequests({ repo: repo(), maxResults: 0 })).rejects.toThrow(expect.objectContaining({ code: 'GITHUB_VALIDATION' }))
+  })
+
+  it('accepts a submission with no inline comments at all', async () => {
+    const { github } = await mountGitHub()
+    github.registerProvider(makeProvider('rest', available))
+    await expect(github.submitReview({ item: item(), event: 'APPROVE' })).resolves.toMatchObject({ state: 'approved' })
   })
 })
 

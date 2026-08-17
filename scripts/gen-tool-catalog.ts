@@ -39,6 +39,9 @@ const BOOT_MANIFEST: readonly ManifestEntry[] = [
     variants: {
       'default': {},
       'read-only': { write: false },
+      // Snapshots the widened review-event enum, so flipping the ADR-0014
+      // default would show up here as a diff instead of silently.
+      'verdicts-on': { reviewVerdicts: true },
     },
   },
 ]
@@ -57,6 +60,15 @@ function stubProvider(): GitHubProvider {
     getComments: refuse,
     getDiff: refuse,
     getChecks: refuse,
+    getReviews: refuse,
+    getReviewComments: refuse,
+    getCheckFailures: refuse,
+    getMergeability: refuse,
+    listPullRequests: refuse,
+    submitReview: refuse,
+    updatePullRequest: refuse,
+    requestReviewers: refuse,
+    setLabels: refuse,
     createIssue: refuse,
     createComment: refuse,
     createPullRequest: refuse,
@@ -75,9 +87,27 @@ async function snapshotVariant(entry: ManifestEntry, config: object): Promise<ob
     .map(schema => ({
       name: schema.name,
       description: schema.description,
-      parameters: Object.keys((schema.parameters as { properties?: object }).properties ?? {}).sort(),
+      parameters: parameterDigest(schema.parameters),
     }))
     .sort((left, right) => left.name.localeCompare(right.name))
+}
+
+/**
+ * Parameter names, each carrying its closed enum when it has one
+ * (`event:COMMENT|APPROVE`).
+ *
+ * Names alone would make two config variants that differ only in an enum look
+ * identical — exactly the drift the `verdicts-on` variant exists to catch
+ * (ADR-0014).
+ */
+function parameterDigest(parameters: unknown): string[] {
+  const properties = (parameters as { properties?: Record<string, unknown> }).properties ?? {}
+  return Object.entries(properties)
+    .map(([name, spec]) => {
+      const values = (spec as { enum?: unknown }).enum
+      return Array.isArray(values) ? `${name}:${values.join('|')}` : name
+    })
+    .sort()
 }
 
 /** Build the whole catalog document, deterministically ordered. */

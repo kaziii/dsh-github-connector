@@ -1,6 +1,6 @@
 # dsh GitHub 连接器 — 执行计划
 
-> 状态：v1（M1–M7）全部完成（见根 [CHANGELOG.md](../../CHANGELOG.md)）；v2「审查闭环」（范围决策见 [ADR-0012](../adr/0012-pr-review-loop-enters-scope.md)）：**M8（审查读侧）与 M9（结构化审查）已完成**，M10 已拆解、未开工。dsh 宿主 CLI（`@deepseek-ai/dsh`）已验证可安装并激活本连接器（`dsh.bundle` patch，见 M3 验收注记）；仅剩两项手工验收挂起：M3 的模型驱动 CLI 走查（只差真实 API key）与 M6 的端到端 UI 脚本（dsh 源码核实后绑定路径已定：连接入口为"插件配置"卡片、端口映射见 [ADR-0008](../adr/0008-settings-card-entry-and-real-slot-binding.md) 与 design §7，待 client 适配层落地后执行；脚本已写入 [PR #5](https://github.com/kaziii/dsh-github-connector/pull/5) 描述）。依据 [design.md](../design/design.md) 拆解为可直接开工的里程碑与任务清单，设计取舍的理由见 [ADR](../adr/README.md)。
+> 状态：v1（M1–M7）全部完成（见根 [CHANGELOG.md](../../CHANGELOG.md)）；v2「审查闭环」（范围决策见 [ADR-0012](../adr/0012-pr-review-loop-enters-scope.md)）：**M8–M10 全部完成**，v2 审查闭环打通（仅 M10 的真实仓库手工验收挂起）。dsh 宿主 CLI（`@deepseek-ai/dsh`）已验证可安装并激活本连接器（`dsh.bundle` patch，见 M3 验收注记）；仅剩两项手工验收挂起：M3 的模型驱动 CLI 走查（只差真实 API key）与 M6 的端到端 UI 脚本（dsh 源码核实后绑定路径已定：连接入口为"插件配置"卡片、端口映射见 [ADR-0008](../adr/0008-settings-card-entry-and-real-slot-binding.md) 与 design §7，待 client 适配层落地后执行；脚本已写入 [PR #5](https://github.com/kaziii/dsh-github-connector/pull/5) 描述）。依据 [design.md](../design/design.md) 拆解为可直接开工的里程碑与任务清单，设计取舍的理由见 [ADR](../adr/README.md)。
 > 原则：每个里程碑结束时**产物独立可用、可测、可合并**；严格按依赖顺序推进，不并行开新面。
 
 ## 0. 总览
@@ -264,13 +264,26 @@ ADR-0013 举的路由例子是"没改测试就不发 `tests` 维度的空壳任�
 
 ### 验收（DoD）
 
-- [ ] `reviewVerdicts` 两种取值下的工具 schema 各有 snapshot（锁定默认值不被无声改动）
-- [ ] 审批通过 / 拒绝 / 取消三路径 × `COMMENT` 与 `APPROVE` 两种确认形态
-- [ ] 自审 422 映射测试
-- [ ] merge 前置检查：可合并 / 冲突 / 必需检查未过 三态，且不可合并时确实没有发出 `PUT`
-- [ ] `gen-tool-catalog.ts` config 变体扩展（default / read-only / verdicts-on）后 `pnpm gate:catalog` 通过
-- [ ] 每包双语 README 的 `## Model Experience` 章节同步新工具；i18n 配对哈希一致
-- [ ] **手工验收**：在真实仓库的他人 PR 上走通"读评审意见 → `github_pr_review` → 提交 `COMMENT` review"
+- [x] `reviewVerdicts` 两种取值下的工具 schema 各有 snapshot（锁定默认值不被无声改动）——工具层直接断言 event 枚举，catalog 变体二次锁定
+- [x] 审批通过 / 拒绝路径 × `COMMENT` 与 `APPROVE` 两种理由形态（取消路径由既有写工具测试覆盖，审批通道是同一条）
+- [x] 自审 422 映射测试（含"不该改写"的两条反例：`COMMENT` 事件、无关的 422）
+- [x] merge 前置检查：可合并 / 冲突 / 必需检查未过 三态，且不可合并时确实没有发出 `PUT`（断言 `calls` 为空）
+- [x] `gen-tool-catalog.ts` config 变体扩展（default / read-only / verdicts-on）后 `pnpm gate:catalog` 通过
+- [x] 每包双语 README 的 `## Model Experience` 章节同步新工具；i18n 配对哈希一致
+- [ ] **手工验收**：在真实仓库的他人 PR 上走通"读评审意见 → `github_pr_review` → 提交 `COMMENT` review" —— **未执行**，需要一个有他人 PR 的真实仓库与 token
+
+### 实现注记（ADR-0014 的确认层无法完全落地）
+
+ADR-0014 的第二层门控写的是"`APPROVE` / `REQUEST_CHANGES` 走强制勾选确认（`RiskConfirmation`，与 Merge 同级）"。实现时发现**做不到**：dsh 的 `PreToolDecision` 只有 `{ kind: 'ask', reason?: string }`，没有可以提升的风险级别字段，工具层无法要求宿主用哪种确认形态。`RiskConfirmation` 是 `ui-github` 在 Merge 路径上直调 `@Remote` 时自己渲染的组件，而工具走的是审批流，够不着它。
+
+因此实际落地为：
+
+1. **能力层**（ADR-0014 第一层）完整实现，且是主防线：`reviewVerdicts` 默认 `false`，关闭时 event 枚举在 **schema 层**就只有 `COMMENT`，模型看不到裁决选项。
+2. **确认层**退化为 reason 文本：裁决类的审批理由明确写出 event、目标 PR、inline 评论数、正文摘要，并点明"以你的账号发出、会改变 PR 是否被阻塞"。这是 `reason` 字符串能承载的全部。
+
+若 dsh 后续给 `PreToolDecision` 加上风险级别，确认层应收敛过去；能力层开关按 ADR-0014 保留。
+
+另一处偏差：design §4.2 曾写 `updatePullRequest` 支持 `draft→ready`。REST **不支持**改 draft 状态（`markPullRequestReadyForReview` 只有 GraphQL 有，而 GraphQL 仍在 §10 排除项内），该字段已从接口移除。
 
 ---
 

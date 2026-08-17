@@ -13,10 +13,15 @@ import GitHubRuntime, {
 } from 'dsh-github'
 import * as toolGitHub from 'dsh-tool-github'
 import {
+  allowedReviewEvents,
   formatChecks,
   formatCiFailures,
+  formatPrList,
   formatReviewBrief,
   formatReviews,
+  prAssignApprovalReason,
+  prUpdateApprovalReason,
+  reviewSubmitApprovalReason,
   type ReviewBriefValue,
   formatComments,
   formatDiff,
@@ -106,6 +111,39 @@ function makeProvider(overrides: Partial<GitHubProvider> = {}): GitHubProvider &
       ],
       truncated: false,
     }),
+    getMergeability: () => Promise.resolve({ mergeable: true, state: 'clean' as const, blockedBy: [] }),
+    listPullRequests: request => Promise.resolve([
+      {
+        ref: { repo: request.repo, number: 5, url: 'https://x/pull/5' },
+        title: 'Add feature',
+        state: 'open' as const,
+        baseRef: 'main',
+        headRef: 'feat/x',
+        author: 'octocat',
+      },
+      {
+        ref: { repo: request.repo, number: 6 },
+        title: 'WIP',
+        state: 'open' as const,
+        baseRef: 'main',
+        headRef: 'feat/y',
+        draft: true,
+      },
+    ]),
+    submitReview: request => Promise.resolve({
+      id: 11,
+      state: request.event === 'APPROVE' ? 'approved' as const : request.event === 'REQUEST_CHANGES' ? 'changes-requested' as const : 'commented' as const,
+      url: 'https://x/pull/5#pullrequestreview-11',
+    }),
+    updatePullRequest: request => Promise.resolve({
+      ref: { ...request.item, url: 'https://x/pull/5' },
+      title: request.title ?? 'Add feature',
+      state: request.state === 'closed' ? 'closed' as const : 'open' as const,
+      baseRef: request.base ?? 'main',
+      headRef: 'feat/x',
+    }),
+    requestReviewers: () => Promise.resolve(),
+    setLabels: request => Promise.resolve([...request.labels]),
     createIssue: request => Promise.resolve({
       ref: { repo: request.repo, number: 9, url: 'https://github.com/octo/hello-world/issues/9' },
       title: request.title,
@@ -182,7 +220,9 @@ function text(result: ToolExecutionResult): string {
 }
 
 const ok = (result: ToolExecutionResult): string => {
-  expect(result.isError).toBe(false)
+  // Surface the tool's own message on failure; a bare `isError` mismatch says
+  // nothing about WHY the call failed.
+  if (result.isError) expect.fail(`expected the tool to succeed, but it failed with: ${text(result)}`)
   return text(result)
 }
 
@@ -692,6 +732,258 @@ describe('github_pr_review (M9)', () => {
       truncated: false,
     }
     expect(formatReviewBrief(brief)).toContain('Applies because: everything changed. Files: the whole diff')
+  })
+})
+
+describe('review verdicts gate (ADR-0014)', () => {
+  /** The event names the model can actually see — read off the emitted JSON Schema. */
+  function eventEnum(ctx: Suite['ctx']): unknown {
+    const definition = ctx.tools.get('github_pr_review_submit')!
+    const schema = definition.parameters as { properties?: { event?: { enum?: unknown } } }
+    return schema.properties?.event?.enum
+  }
+
+  it('hides APPROVE and REQUEST_CHANGES from the schema by default', async () => {
+    const { ctx } = await mountSuite()
+    expect(eventEnum(ctx)).toEqual(['COMMENT'])
+    expect(ctx.tools.get('github_pr_review_submit')!.description).toContain('switched off')
+  })
+
+  it('exposes all three events only when reviewVerdicts is switched on', async () => {
+    const { ctx } = await mountSuite({ reviewVerdicts: true })
+    expect(eventEnum(ctx)).toEqual(['COMMENT', 'APPROVE', 'REQUEST_CHANGES'])
+    expect(ctx.tools.get('github_pr_review_submit')!.description).toContain('user\'s own voice')
+  })
+
+  it('keeps the default off, so a deployment must opt in deliberately', () => {
+    expect(toolGitHub.Config({}).reviewVerdicts).toBe(false)
+    expect(allowedReviewEvents({ reviewVerdicts: false } as never)).toEqual(['COMMENT'])
+    expect(allowedReviewEvents({ reviewVerdicts: true } as never)).toEqual(['COMMENT', 'APPROVE', 'REQUEST_CHANGES'])
+  })
+
+  it('registers no review-write tool at all when writes are off', async () => {
+    const { ctx } = await mountSuite({ write: false, reviewVerdicts: true })
+    expect(ctx.tools.get('github_pr_review_submit')).toBeUndefined()
+    expect(ctx.tools.get('github_pr_update')).toBeUndefined()
+    expect(ctx.tools.get('github_pr_assign')).toBeUndefined()
+    // ...but the read-only listing survives, like the other reads.
+    expect(ctx.tools.get('github_pr_list')).toBeDefined()
+  })
+
+  it('names the event and its consequence in the approval reason for a verdict', () => {
+    const reason = reviewSubmitApprovalReason({
+      repo: 'octo/hello-world',
+      number: 5,
+      event: 'APPROVE',
+      body: 'Ship it\nmore detail',
+      comments: [{ path: 'a.ts', line: 1, body: 'x' }],
+    })
+    expect(reason).toContain('APPROVE review on octo/hello-world#5 under YOUR GitHub account')
+    expect(reason).toContain('1 inline comment(s)')
+    expect(reason).toContain('changes whether the PR is blocked')
+    expect(reason).toContain('Ship it')
+  })
+
+  it('keeps the plain-comment reason free of verdict language', () => {
+    const reason = reviewSubmitApprovalReason({ repo: 'octo/hello-world', number: 5, event: 'COMMENT' })
+    expect(reason).toBe('Submit a review comment on octo/hello-world#5 (no inline comments)')
+  })
+
+  it('stays defensive against wrongly-typed approval arguments', () => {
+    expect(reviewSubmitApprovalReason(null)).toContain('?#?')
+    expect(reviewSubmitApprovalReason({ comments: 'not an array' })).toContain('no inline comments')
+    expect(prUpdateApprovalReason({})).toContain('no fields')
+    expect(prAssignApprovalReason({})).toContain('nothing to change')
+  })
+
+  it('summarizes update and assign reasons from their arguments', () => {
+    expect(prUpdateApprovalReason({ repo: 'o/r', number: 5, title: 'New title', body: 'x', state: 'closed' }))
+      .toBe('Update GitHub PR o/r#5: title → "New title", body, state → "closed"')
+    expect(prAssignApprovalReason({ repo: 'o/r', number: 5, reviewers: ['a', 'b'], labels: ['bug'], label_mode: 'set' }))
+      .toBe('Update GitHub PR o/r#5: request review from 2 user(s), replace 1 label(s)')
+    expect(prAssignApprovalReason({ repo: 'o/r', number: 5, labels: ['bug'] }))
+      .toBe('Update GitHub PR o/r#5: add 1 label(s)')
+  })
+})
+
+describe('review-write tools (M10)', () => {
+  it('submits a comment review with inline comments after approval', async () => {
+    const suite = await mountSuite({}, { approval: true })
+    const result = await suite.run('github_pr_review_submit', {
+      repo: 'octo/hello-world',
+      number: 5,
+      event: 'COMMENT',
+      body: 'notes',
+      comments: [{ path: 'src/a.ts', line: 42, body: 'this leaks', side: 'right' }],
+    }, { withAgent: true })
+    expect(ok(result)).toBe(
+      'Submitted a COMMENT review on octo/hello-world#5 (1 inline comment(s)); it now reads as commented.'
+      + '\nhttps://x/pull/5#pullrequestreview-11',
+    )
+    expect(suite.approval!.requests[0]!.reason).toContain('Submit a review comment')
+  })
+
+  it('submits a verdict when the switch is on, and reports the resulting state', async () => {
+    const suite = await mountSuite({ reviewVerdicts: true }, { approval: true })
+    expect(ok(await suite.run('github_pr_review_submit', { repo: 'octo/hello-world', number: 5, event: 'APPROVE' }, { withAgent: true })))
+      .toContain('it now reads as approved')
+    expect(suite.approval!.requests[0]!.reason).toContain('under YOUR GitHub account')
+  })
+
+  it('turns a denied submission into an answer, not an exception', async () => {
+    const suite = await mountSuite({}, { approval: true })
+    suite.approval!.outcomes = ['rejected']
+    const result = await suite.run('github_pr_review_submit', { repo: 'octo/hello-world', number: 5, event: 'COMMENT' }, { withAgent: true })
+    expect(result.isError).toBe(true)
+    expect(text(result)).not.toBe('')
+  })
+
+  it('updates a pull request and renders the resulting shape', async () => {
+    const suite = await mountSuite({}, { approval: true })
+    const result = await suite.run('github_pr_update', {
+      repo: 'octo/hello-world',
+      number: 5,
+      title: 'Renamed',
+      body: 'new body',
+      base: 'develop',
+      state: 'closed',
+    }, { withAgent: true })
+    expect(ok(result)).toBe('Updated octo/hello-world#5: "Renamed" [closed] → develop\nhttps://x/pull/5')
+  })
+
+  it('sends only the field it was given, and renders a PR that has no URL', async () => {
+    const requests: unknown[] = []
+    const suite = await mountSuite({}, {
+      approval: true,
+      provider: {
+        updatePullRequest: request => {
+          requests.push(request)
+          return Promise.resolve({
+            ref: { repo: request.item.repo, number: request.item.number },
+            title: 'Renamed',
+            state: 'open' as const,
+            baseRef: 'main',
+            headRef: 'feat/x',
+          })
+        },
+      },
+    })
+    const result = await suite.run('github_pr_update', { repo: 'octo/hello-world', number: 5, title: 'Renamed' }, { withAgent: true })
+    expect(requests[0]).toEqual({ item: { repo: { owner: 'octo', repo: 'hello-world' }, number: 5 }, title: 'Renamed' })
+    expect(ok(result)).toBe('Updated octo/hello-world#5: "Renamed" [open] → main')
+
+    // ...and the same holds for a title-less update.
+    await suite.run('github_pr_update', { repo: 'octo/hello-world', number: 5, state: 'closed' }, { withAgent: true })
+    expect(requests[1]).toEqual({ item: { repo: { owner: 'octo', repo: 'hello-world' }, number: 5 }, state: 'closed' })
+  })
+
+  it('renders a submitted review that came back without a URL', async () => {
+    const suite = await mountSuite({}, {
+      approval: true,
+      provider: { submitReview: () => Promise.resolve({ id: 11, state: 'commented' as const }) },
+    })
+    // The comment carries no explicit side — the seam and GitHub both default it.
+    expect(ok(await suite.run('github_pr_review_submit', {
+      repo: 'octo/hello-world',
+      number: 5,
+      event: 'COMMENT',
+      comments: [{ path: 'src/a.ts', line: 3, body: 'no side given' }],
+    }, { withAgent: true })))
+      .toBe('Submitted a COMMENT review on octo/hello-world#5 (1 inline comment(s)); it now reads as commented.')
+  })
+
+  it('assigns reviewers and labels, and reports both', async () => {
+    const suite = await mountSuite({}, { approval: true })
+    const result = await suite.run('github_pr_assign', {
+      repo: 'octo/hello-world',
+      number: 5,
+      reviewers: ['alice'],
+      labels: ['bug', 'urgent'],
+      label_mode: 'add',
+    }, { withAgent: true })
+    expect(ok(result)).toBe('Updated octo/hello-world#5.\nReview requested from: alice\nLabels now: bug, urgent')
+  })
+
+  it('handles each half of an assignment on its own', async () => {
+    const suite = await mountSuite({}, { approval: true })
+    expect(ok(await suite.run('github_pr_assign', { repo: 'octo/hello-world', number: 5, reviewers: ['alice'] }, { withAgent: true })))
+      .toBe('Updated octo/hello-world#5.\nReview requested from: alice')
+    // No label_mode given: the seam default (add) applies.
+    expect(ok(await suite.run('github_pr_assign', { repo: 'octo/hello-world', number: 5, labels: ['bug'] }, { withAgent: true })))
+      .toBe('Updated octo/hello-world#5.\nLabels now: bug')
+  })
+
+  it('skips the calls it has nothing to do', async () => {
+    const seen: string[] = []
+    const suite = await mountSuite({}, {
+      approval: true,
+      provider: {
+        requestReviewers: () => { seen.push('reviewers'); return Promise.resolve() },
+        setLabels: request => { seen.push('labels'); return Promise.resolve([...request.labels]) },
+      },
+    })
+    expect(ok(await suite.run('github_pr_assign', { repo: 'octo/hello-world', number: 5, reviewers: [], labels: [] }, { withAgent: true })))
+      .toBe('Updated octo/hello-world#5.')
+    expect(seen).toEqual([])
+  })
+
+  it('presents each pending review-write as an edit', async () => {
+    const { ctx } = await mountSuite()
+    expect(ctx.tools.get('github_pr_review_submit')!.presentCall!({ repo: 'o/r', number: 5, event: 'COMMENT' }))
+      .toMatchObject({ title: 'Submit COMMENT review on GitHub PR o/r#5', kind: 'edit' })
+    expect(ctx.tools.get('github_pr_update')!.presentCall!({ repo: 'o/r', number: 5 }))
+      .toMatchObject({ title: 'Update GitHub PR o/r#5', kind: 'edit' })
+    expect(ctx.tools.get('github_pr_assign')!.presentCall!({ repo: 'o/r', number: 5 }))
+      .toMatchObject({ title: 'Assign on GitHub PR o/r#5', kind: 'edit' })
+  })
+
+  it('rejects a non-positive PR number in every review-write tool', async () => {
+    const suite = await mountSuite({}, { approval: true })
+    for (const name of ['github_pr_review_submit', 'github_pr_update', 'github_pr_assign']) {
+      const result = await suite.run(name, { repo: 'octo/hello-world', number: 0, event: 'COMMENT' }, { withAgent: true })
+      expect(result.isError).toBe(true)
+    }
+  })
+})
+
+describe('github_pr_list (M10)', () => {
+  it('lists pull requests as lean scannable rows', async () => {
+    const suite = await mountSuite()
+    expect(ok(await suite.run('github_pr_list', { repo: 'octo/hello-world' }))).toBe([
+      'Pull requests in octo/hello-world (2):',
+      '- #5 [open] Add feature · feat/x → main · octocat',
+      '- #6 [open (draft)] WIP · feat/y → main',
+    ].join('\n'))
+  })
+
+  it('passes filters and the capped bound to the seam', async () => {
+    const requests: unknown[] = []
+    const suite = await mountSuite({ searchMaxResults: 3 }, {
+      provider: {
+        listPullRequests: request => { requests.push(request); return Promise.resolve([]) },
+      },
+    })
+    const result = await suite.run('github_pr_list', {
+      repo: 'octo/hello-world',
+      state: 'all',
+      head: 'feat/x',
+      base: 'main',
+      max_results: 99,
+    })
+    expect(requests[0]).toMatchObject({ state: 'all', head: 'feat/x', base: 'main', maxResults: 3 })
+    expect(ok(result)).toBe('No pull requests in octo/hello-world for that filter.')
+  })
+
+  it('is a read tool: present, concurrency-safe, and alive under write: false', async () => {
+    const { ctx } = await mountSuite({ write: false })
+    const definition = ctx.tools.get('github_pr_list')!
+    expect(definition.isConcurrencySafe!({ repo: 'o/r' })).toBe(true)
+    expect(definition.presentCall!({ repo: 'o/r' })).toMatchObject({ title: 'List GitHub pull requests in o/r', kind: 'read' })
+  })
+
+  it('rejects a non-positive max_results', async () => {
+    const suite = await mountSuite()
+    expect((await suite.run('github_pr_list', { repo: 'octo/hello-world', max_results: 0 })).isError).toBe(true)
   })
 })
 

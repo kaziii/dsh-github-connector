@@ -26,14 +26,21 @@ import type {
   GitHubIssue,
   GitHubIssueCreateRequest,
   GitHubItemRef,
+  GitHubLabelsRequest,
+  GitHubMergeability,
+  GitHubMergeableState,
   GitHubProvider,
   GitHubPullRequest,
   GitHubPullRequestCreateRequest,
   GitHubPullRequestCreateResult,
+  GitHubPullRequestListRequest,
+  GitHubPullRequestUpdateRequest,
   GitHubRepoRef,
   GitHubReview,
   GitHubReviewComment,
+  GitHubReviewersRequest,
   GitHubReviewState,
+  GitHubReviewSubmitRequest,
   GitHubSearchItem,
   GitHubSearchKind,
   GitHubSearchRequest,
@@ -147,6 +154,11 @@ interface RawReviewComment {
   readonly html_url?: string
   readonly in_reply_to_id?: number
 }
+/** Pull-request shape with the merge-readiness fields the merge path needs. */
+interface RawMergeablePullRequest {
+  readonly mergeable?: boolean | null
+  readonly mergeable_state?: string | null
+}
 interface RawAnnotation {
   readonly path: string
   readonly annotation_level?: string | null
@@ -201,6 +213,22 @@ const ANNOTATION_LEVELS: ReadonlySet<string> = new Set<GitHubAnnotationLevel>(['
 
 /** Conclusions that count as a failure worth gathering evidence for (ADR-0015). */
 const FAILED_CONCLUSIONS: ReadonlySet<string> = new Set(['failure', 'timed_out', 'cancelled'])
+
+/** Merge states the seam vocabulary knows; anything else reads as `unknown`. */
+const MERGEABLE_STATES: ReadonlySet<string> = new Set<GitHubMergeableState>([
+  'clean', 'blocked', 'dirty', 'unstable', 'behind', 'draft', 'unknown',
+])
+
+/** What each non-clean merge state means to someone deciding whether to merge. */
+const MERGE_BLOCKERS: Readonly<Record<GitHubMergeableState, string | undefined>> = {
+  clean: undefined,
+  blocked: 'a branch protection requirement is not satisfied (required review or required check)',
+  dirty: 'the branch has conflicts with its base',
+  unstable: 'a non-required check is failing',
+  behind: 'the branch is behind its base and must be updated first',
+  draft: 'the pull request is still a draft',
+  unknown: 'GitHub has not finished computing mergeability — retry shortly',
+}
 
 /** Diff statuses the seam vocabulary knows; anything the API adds later degrades to `changed`. */
 const FILE_STATUSES: ReadonlySet<string> = new Set<GitHubDiffFileStatus>([
@@ -320,6 +348,31 @@ function mapCheckRun(raw: RawCheckRun): GitHubCheckRun {
     ...optional('conclusion', raw.conclusion),
     ...optional('url', raw.html_url),
   }
+}
+
+/** The blockers to show for one merge state, plus GitHub's own boolean when it disagrees. */
+function blockersOf(state: GitHubMergeableState, raw: RawMergeablePullRequest): readonly string[] {
+  const reason = MERGE_BLOCKERS[state]
+  if (reason !== undefined) return [reason]
+  // `clean` with mergeable === false should not happen, but if GitHub says so,
+  // believe the boolean rather than the label.
+  return raw.mergeable === false ? ['GitHub reports the pull request as not mergeable'] : []
+}
+
+/**
+ * Turn GitHub's terse refusal of a self-approval into something the model can
+ * act on. Approving your own pull request is a platform rule, not a bug in the
+ * request, and the bare 422 says nothing a caller could use.
+ */
+function explainSelfApproval(request: GitHubReviewSubmitRequest, error: unknown): unknown {
+  if (!(error instanceof GitHubError) || error.code !== 'GITHUB_VALIDATION') return error
+  if (request.event !== 'APPROVE' && request.event !== 'REQUEST_CHANGES') return error
+  if (!/own pull request/i.test(error.message)) return error
+  return new GitHubError(
+    `GitHub does not allow ${request.event} on your own pull request — only COMMENT is available here.`,
+    'GITHUB_VALIDATION',
+    { cause: error },
+  )
 }
 
 /**
@@ -551,6 +604,103 @@ export class RestGitHubProvider implements GitHubProvider {
     const url = buildUrl(transport.baseURL, `${repoPath(request.item.repo)}/issues/${request.item.number}/comments`)
     const { json } = await restRequest(transport, url, { method: 'POST', body: { body: request.body }, signal })
     return mapComment(json as RawComment)
+  }
+
+  async getMergeability(item: GitHubItemRef, signal?: AbortSignal): Promise<GitHubMergeability> {
+    const transport = await this.transport()
+    const { json } = await restRequest(transport, this.itemUrl(transport, item, 'pulls'), { signal })
+    const raw = json as RawMergeablePullRequest
+    const state = MERGEABLE_STATES.has(raw.mergeable_state ?? '') ? raw.mergeable_state as GitHubMergeableState : 'unknown'
+    return {
+      ...optional('mergeable', raw.mergeable),
+      state,
+      blockedBy: blockersOf(state, raw),
+    }
+  }
+
+  async listPullRequests(request: GitHubPullRequestListRequest, signal?: AbortSignal): Promise<readonly GitHubPullRequest[]> {
+    const transport = await this.transport()
+    const first = buildUrl(transport.baseURL, `${repoPath(request.repo)}/pulls`, {
+      state: request.state ?? 'open',
+      // The API wants `owner:branch` for head; callers pass a bare branch name.
+      ...request.head === undefined ? {} : { head: `${request.repo.owner}:${request.head}` },
+      ...request.base === undefined ? {} : { base: request.base },
+      per_page: request.maxResults === undefined ? PAGE_SIZE : Math.min(request.maxResults, PAGE_SIZE),
+    })
+    const { items } = await restPaginate(
+      transport,
+      first,
+      json => (json as readonly RawPullRequest[]),
+      { signal },
+      prs => request.maxResults !== undefined && prs.length >= request.maxResults,
+    )
+    return items.map(raw => mapPullRequest(request.repo, raw))
+  }
+
+  async submitReview(request: GitHubReviewSubmitRequest, signal?: AbortSignal): Promise<GitHubReview> {
+    const transport = await this.transport()
+    const url = buildUrl(transport.baseURL, `${repoPath(request.item.repo)}/pulls/${request.item.number}/reviews`)
+    try {
+      const { json } = await restRequest(transport, url, {
+        method: 'POST',
+        body: {
+          event: request.event,
+          ...optional('body', request.body),
+          ...request.comments === undefined ? {} : {
+            comments: request.comments.map(comment => ({
+              path: comment.path,
+              line: comment.line,
+              body: comment.body,
+              ...comment.side === undefined ? {} : { side: comment.side === 'left' ? 'LEFT' : 'RIGHT' },
+            })),
+          },
+        },
+        signal,
+      })
+      return mapReview(json as RawReview)
+    } catch (error) {
+      throw explainSelfApproval(request, error)
+    }
+  }
+
+  async updatePullRequest(request: GitHubPullRequestUpdateRequest, signal?: AbortSignal): Promise<GitHubPullRequest> {
+    const transport = await this.transport()
+    const { json } = await restRequest(transport, this.itemUrl(transport, request.item, 'pulls'), {
+      method: 'PATCH',
+      body: {
+        ...optional('title', request.title),
+        ...optional('body', request.body),
+        ...optional('base', request.base),
+        ...optional('state', request.state),
+      },
+      signal,
+    })
+    return mapPullRequest(request.item.repo, json as RawPullRequest)
+  }
+
+  async requestReviewers(request: GitHubReviewersRequest, signal?: AbortSignal): Promise<void> {
+    const transport = await this.transport()
+    const url = buildUrl(transport.baseURL, `${repoPath(request.item.repo)}/pulls/${request.item.number}/requested_reviewers`)
+    await restRequest(transport, url, {
+      method: 'POST',
+      body: {
+        ...request.reviewers === undefined ? {} : { reviewers: request.reviewers },
+        ...request.teamReviewers === undefined ? {} : { team_reviewers: request.teamReviewers },
+      },
+      signal,
+    })
+  }
+
+  async setLabels(request: GitHubLabelsRequest, signal?: AbortSignal): Promise<readonly string[]> {
+    const transport = await this.transport()
+    const url = buildUrl(transport.baseURL, `${repoPath(request.item.repo)}/issues/${request.item.number}/labels`)
+    // POST adds to the existing set; PUT replaces it wholesale.
+    const { json } = await restRequest(transport, url, {
+      method: request.mode === 'set' ? 'PUT' : 'POST',
+      body: { labels: [...request.labels] },
+      signal,
+    })
+    return (json as readonly RawLabel[]).map(label => label.name).filter((name): name is string => name !== undefined)
   }
 
   async createPullRequest(request: GitHubPullRequestCreateRequest, signal?: AbortSignal): Promise<GitHubPullRequestCreateResult> {

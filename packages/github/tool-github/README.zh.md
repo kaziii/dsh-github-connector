@@ -10,9 +10,13 @@
 | `github_issue_read` | 标题、状态、标签、正文，外加封顶的聚合评论。 |
 | `github_pr_read` | 拆分为按需 part：`metadata`（默认）/ `diff` / `comments` / `reviews` / `checks` / `ci-failures`——一次调用绝不为模型没要的数据付费。 |
 | `github_pr_review` | 为一个 PR 组装结构化审查任务：diff（只出现一次）、适用于本次改动的维度、每个维度的 checklist、严重度口径、finding 契约。给的是证据与契约，不是裁决（ADR-0013）。 |
+| `github_pr_list` | 列出仓库的 PR，可按状态与 head/base 过滤。只读。 |
 | `github_issue_create` | 写操作，审批门控。 |
 | `github_issue_comment` | 写操作，审批门控。 |
 | `github_pr_create` | 写操作，审批门控，幂等（同 head/base 已有开放 PR 是正常答案，不是错误）。 |
+| `github_pr_review_submit` | 写操作，审批门控。提交带行级评论的审查。`APPROVE` / `REQUEST_CHANGES` 只在 `reviewVerdicts` 打开时存在（ADR-0014）。 |
+| `github_pr_update` | 写操作，审批门控。标题、正文、base 分支、开/关状态。 |
+| `github_pr_assign` | 写操作，审批门控。指派 reviewer、应用 label。 |
 
 ## 配置
 
@@ -24,7 +28,19 @@
 | `diffMaxFiles` / `diffMaxPatchChars` | `50` / `60000` | **工具层持有**的 diff 预算（ADR-0005）：此处持有、传给 seam、由 seam 执行。 |
 | `logMaxLines` / `logMaxChars` | `80` / `8000` | **工具层持有**的 CI 日志预算，机制同上。只作用于日志**尾部**（ADR-0015）。 |
 | `reviewMaxFiles` / `reviewMaxPatchChars` | `60` / `120000` | **工具层持有**的审查 brief 预算。刻意不复用上面的 diff 预算：审查读的范围比普通 diff 读更宽（ADR-0013）。 |
+| `reviewVerdicts` | `false` | `APPROVE` / `REQUEST_CHANGES` 是否存在。默认关（ADR-0014）——见下节。 |
 | `timeoutMs` | `30000` | 挂到每个工具上的协作式超时（由 `dsh-timeout-policy` 执行）。 |
+
+## 审查裁决默认关闭（ADR-0014）
+
+提交审查是本包第一个带**社会后果**的操作：`APPROVE` 与 `REQUEST_CHANGES` 以用户本人的账号发出，在协作者眼里就是用户的判断，并且会改变 PR 是否被阻塞。对这种操作，"每次弹审批"是错误的最后防线——在审批疲劳下，一次走神的"是"就够了。
+
+所以能力本身是 opt-in 的。`reviewVerdicts` 关闭时（默认），event 枚举里只有 `COMMENT`：模型根本看不到"可以批准"这件事，也就无从尝试、无从被拒。打开开关才会加宽枚举，而每次提交仍然要过审批流，理由里会点明 event 及其后果。
+
+两点值得知道：
+
+- GitHub 不允许对**自己创建的** PR 执行 `APPROVE` 与 `REQUEST_CHANGES`。状态条 [AI 审查] 恰恰就是这种场景，因此它只可能产出 `COMMENT` —— provider 会把平台那句干巴巴的 422 翻译成人话。
+- 宿主的 `PreToolDecision` 只带一个 reason 字符串，没有可提升的风险级别，所以那段 reason 的措辞**就是**这里能有的全部确认层。详见执行计划的 M10 实现注记。
 
 ## 审批流（写操作）
 

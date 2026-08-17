@@ -24,11 +24,17 @@ import type {
   GitHubIssue,
   GitHubIssueCreateRequest,
   GitHubItemRef,
+  GitHubLabelsRequest,
+  GitHubMergeability,
   GitHubProvider,
   GitHubPullRequest,
   GitHubPullRequestCreateRequest,
   GitHubPullRequestCreateResult,
+  GitHubPullRequestListRequest,
+  GitHubPullRequestUpdateRequest,
   GitHubRepoRef,
+  GitHubReviewersRequest,
+  GitHubReviewSubmitRequest,
   GitHubReview,
   GitHubReviewBrief,
   GitHubReviewBriefRequest,
@@ -65,22 +71,31 @@ export type {
   GitHubIssueCreateRequest,
   GitHubIssueState,
   GitHubItemRef,
+  GitHubLabelsRequest,
+  GitHubMergeability,
+  GitHubMergeableState,
   GitHubProvider,
   GitHubPullRequest,
   GitHubPullRequestCreateRequest,
   GitHubPullRequestCreateResult,
+  GitHubPullRequestListRequest,
   GitHubPullRequestState,
+  GitHubPullRequestUpdateRequest,
   GitHubRepoRef,
   GitHubReview,
   GitHubReviewBrief,
   GitHubReviewBriefRequest,
   GitHubReviewComment,
+  GitHubReviewCommentDraft,
   GitHubReviewDimension,
   GitHubReviewDimensionBrief,
+  GitHubReviewersRequest,
+  GitHubReviewEvent,
   GitHubReviewSeverity,
   GitHubReviewSeverityLevel,
   GitHubReviewSide,
   GitHubReviewState,
+  GitHubReviewSubmitRequest,
   GitHubSearchItem,
   GitHubSearchKind,
   GitHubSearchRequest,
@@ -303,6 +318,78 @@ export class GitHubRuntime extends Service {
   }
 
   /**
+   * Read a pull request's merge readiness. Callers are expected to consult this
+   * BEFORE attempting a merge, so a doomed merge is refused locally with a
+   * reason rather than as an opaque HTTP failure.
+   * @param item - the pull request handle.
+   * @param signal - optional cancellation signal forwarded to the provider.
+   * @returns mergeability with human-readable blockers.
+   */
+  async getMergeability(item: GitHubItemRef, signal?: AbortSignal): Promise<GitHubMergeability> {
+    assertItemRef(item)
+    return this.resolveProvider().getMergeability(item, signal)
+  }
+
+  /**
+   * List a repository's pull requests, capped at the seam like {@link search}.
+   * @param request - repo, filters, and an optional result bound.
+   * @param signal - optional cancellation signal forwarded to the provider.
+   * @returns the pull requests, capped to `request.maxResults`.
+   */
+  async listPullRequests(request: GitHubPullRequestListRequest, signal?: AbortSignal): Promise<readonly GitHubPullRequest[]> {
+    assertRepoRef(request.repo)
+    assertPositiveInteger('maxResults', request.maxResults)
+    const items = await this.resolveProvider().listPullRequests(request, signal)
+    return request.maxResults === undefined ? items : items.slice(0, request.maxResults)
+  }
+
+  /**
+   * Submit one review. The seam does NOT decide whether a verdict is allowed —
+   * that gate lives at the tool layer (ADR-0014), because it is a policy about
+   * what the MODEL may do, not about what GitHub supports.
+   * @param request - target PR, event, and optional body and inline comments.
+   * @param signal - optional cancellation signal forwarded to the provider.
+   * @returns the submitted review.
+   */
+  async submitReview(request: GitHubReviewSubmitRequest, signal?: AbortSignal): Promise<GitHubReview> {
+    assertItemRef(request.item)
+    assertReviewComments(request.comments)
+    return this.resolveProvider().submitReview(request, signal)
+  }
+
+  /**
+   * Update one pull request's own fields.
+   * @param request - target PR plus the fields to change.
+   * @param signal - optional cancellation signal forwarded to the provider.
+   * @returns the updated pull request.
+   */
+  async updatePullRequest(request: GitHubPullRequestUpdateRequest, signal?: AbortSignal): Promise<GitHubPullRequest> {
+    assertItemRef(request.item)
+    return this.resolveProvider().updatePullRequest(request, signal)
+  }
+
+  /**
+   * Request review from users and/or teams.
+   * @param request - target PR plus reviewers.
+   * @param signal - optional cancellation signal forwarded to the provider.
+   */
+  async requestReviewers(request: GitHubReviewersRequest, signal?: AbortSignal): Promise<void> {
+    assertItemRef(request.item)
+    return this.resolveProvider().requestReviewers(request, signal)
+  }
+
+  /**
+   * Apply labels to an issue or pull request.
+   * @param request - target item, labels, and add-vs-set mode.
+   * @param signal - optional cancellation signal forwarded to the provider.
+   * @returns the resulting label set.
+   */
+  async setLabels(request: GitHubLabelsRequest, signal?: AbortSignal): Promise<readonly string[]> {
+    assertItemRef(request.item)
+    return this.resolveProvider().setLabels(request, signal)
+  }
+
+  /**
    * Create one issue through the selected provider.
    * @param request - target repo plus issue content.
    * @param signal - optional cancellation signal forwarded to the provider.
@@ -374,6 +461,22 @@ function assertItemRef(item: GitHubItemRef): void {
   assertRepoRef(item.repo)
   if (!Number.isInteger(item.number) || item.number <= 0) {
     throw new GitHubError(`a GitHub item number must be a positive integer, got ${item.number}`, 'GITHUB_VALIDATION')
+  }
+}
+
+/**
+ * Reject inline review comments that could not anchor. A comment without a
+ * real line number would be rejected by GitHub anyway, and reporting it here
+ * names the offending path instead of surfacing an opaque 422.
+ */
+function assertReviewComments(comments: GitHubReviewSubmitRequest['comments']): void {
+  for (const comment of comments ?? []) {
+    if (comment.path.trim() === '') {
+      throw new GitHubError('a review comment requires a non-blank path', 'GITHUB_VALIDATION')
+    }
+    if (!Number.isInteger(comment.line) || comment.line <= 0) {
+      throw new GitHubError(`a review comment on ${comment.path} needs a positive integer line, got ${comment.line}`, 'GITHUB_VALIDATION')
+    }
   }
 }
 

@@ -10,6 +10,16 @@
 
 ## Unreleased
 
+M10 — the write half of the review loop, closing v2:
+
+- **`github_pr_review_submit`** posts a review with inline comments. `APPROVE` and `REQUEST_CHANGES` are gated by a new `reviewVerdicts` switch that **defaults to false** (ADR-0014): with it off, those events are absent from the schema entirely, so the model never sees that approving is possible. This is the project's first operation with a social consequence — it goes out under the user's own account and changes whether a PR is blocked — and a per-call approval prompt is the wrong last line of defence against approval fatigue.
+- **`github_pr_update` / `github_pr_assign` / `github_pr_list`** — title, body, base retarget, open/closed; reviewer requests and labels (add or replace); a capped listing. The first two are approval-gated writes; the listing is a read and survives `write: false`.
+- **Merge pre-check** — `mergePr` now reads mergeability first and, when GitHub already knows the merge cannot succeed, returns the blockers **without sending the PUT**. The status bar shows them in place. A doomed merge should read as "cannot merge because X", not as an opaque failure after the fact.
+- **Self-approval, explained** — GitHub refuses `APPROVE` on your own PR with a terse 422; the provider rewrites it into a sentence saying so, since the status bar's own [AI review] path is exactly that case.
+- **Catalog snapshots now carry closed enums** (`event:COMMENT` vs `event:COMMENT|APPROVE|REQUEST_CHANGES`). Names alone made two variants differing only in an enum look identical — precisely the drift the new `verdicts-on` variant exists to catch.
+
+Two constraints found while building it, both recorded in the execution plan: dsh's `PreToolDecision` carries only a reason string with no risk level, so ADR-0014's "forced-checkbox confirmation" degrades to wording (the capability switch remains the real defence); and REST cannot flip draft↔ready at all, so that field left the interface.
+
 M9 — `github_pr_review` (ADR-0013), replacing the one-line "review this PR" prompt with a task that has a known shape:
 
 - **Deterministic dimension routing** — `classifyFile` / `changedLines` / `routeDimensions` in the seam decide which of the six axes (correctness, tests, error-handling, types, comments, simplification) this particular change warrants. Keyword probes read only `+`/`-` lines, never context, so a `catch` the author merely scrolled past cannot route a whole review through error handling. A docs-only PR is never asked about type design. Routing earns its keep by *excluding* what would arrive empty, not by distributing axes evenly.

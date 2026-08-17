@@ -324,6 +324,91 @@ export interface GitHubPullRequestCreateResult {
 }
 
 /**
+ * What submitting a review DOES. `COMMENT` leaves opinion; the other two carry
+ * social consequence — they change a PR's blocking state under the user's own
+ * name — which is why the tool layer gates them behind an explicit opt-in
+ * (ADR-0014).
+ */
+export type GitHubReviewEvent = 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES'
+
+/** One inline comment to leave as part of a submitted review. */
+export interface GitHubReviewCommentDraft {
+  readonly path: string
+  /** Line in the file's post-change state (or pre-change when `side` is `left`). */
+  readonly line: number
+  readonly side?: GitHubReviewSide
+  readonly body: string
+}
+
+/** Submit one review: a verdict, an optional summary, and optional inline comments. */
+export interface GitHubReviewSubmitRequest {
+  readonly item: GitHubItemRef
+  readonly event: GitHubReviewEvent
+  readonly body?: string
+  readonly comments?: readonly GitHubReviewCommentDraft[]
+}
+
+/**
+ * Update one pull request's own fields.
+ *
+ * Draft↔ready is deliberately absent: REST cannot flip it (GitHub exposes
+ * `markPullRequestReadyForReview` only through GraphQL, which stays out of
+ * scope per design §10).
+ */
+export interface GitHubPullRequestUpdateRequest {
+  readonly item: GitHubItemRef
+  readonly title?: string
+  readonly body?: string
+  /** Retarget the PR at a different base branch. */
+  readonly base?: string
+  readonly state?: 'open' | 'closed'
+}
+
+/** Request review from users and/or teams. */
+export interface GitHubReviewersRequest {
+  readonly item: GitHubItemRef
+  readonly reviewers?: readonly string[]
+  readonly teamReviewers?: readonly string[]
+}
+
+/** Apply labels, either adding to or replacing the current set. */
+export interface GitHubLabelsRequest {
+  readonly item: GitHubItemRef
+  readonly labels: readonly string[]
+  /** `add` keeps existing labels (default); `set` replaces them wholesale. */
+  readonly mode?: 'add' | 'set'
+}
+
+/** List pull requests of one repository. */
+export interface GitHubPullRequestListRequest {
+  readonly repo: GitHubRepoRef
+  readonly state?: 'open' | 'closed' | 'all'
+  /** Filter by head branch (bare name; the provider qualifies it with the owner). */
+  readonly head?: string
+  readonly base?: string
+  readonly maxResults?: number
+}
+
+/**
+ * GitHub's merge-readiness verdict for one pull request.
+ *
+ * `clean` merges; `dirty` has conflicts; `blocked` fails a branch-protection
+ * requirement; `unstable` has a failing non-required check; `behind` needs the
+ * base merged in; `draft` is not ready by definition. `unknown` is GitHub still
+ * computing — it is NOT permission to merge.
+ */
+export type GitHubMergeableState = 'clean' | 'blocked' | 'dirty' | 'unstable' | 'behind' | 'draft' | 'unknown'
+
+/** Merge readiness, with the reasons a caller can show the user verbatim. */
+export interface GitHubMergeability {
+  /** GitHub's own boolean; absent while it is still computing. */
+  readonly mergeable?: boolean
+  readonly state: GitHubMergeableState
+  /** Human-readable blockers; empty when nothing blocks the merge. */
+  readonly blockedBy: readonly string[]
+}
+
+/**
  * One axis of a structured review. A CLOSED union owned by `dsh-github`:
  * consumers `switch` on it ending in `default: assertNever(...)`, so adding an
  * axis is a deliberate seam change rather than a config string.
@@ -420,6 +505,18 @@ export interface GitHubProvider {
    * log; the seam enforces the budget and keeps `truncated` honest.
    */
   getCheckFailures(item: GitHubItemRef, request: GitHubCheckFailureRequest, signal?: AbortSignal): Promise<GitHubCheckFailuresResult>
+  /** Merge readiness of a pull request, with the blockers spelled out. */
+  getMergeability(item: GitHubItemRef, signal?: AbortSignal): Promise<GitHubMergeability>
+  /** List pull requests of one repository. */
+  listPullRequests(request: GitHubPullRequestListRequest, signal?: AbortSignal): Promise<readonly GitHubPullRequest[]>
+  /** Submit one review (verdict + optional summary and inline comments). */
+  submitReview(request: GitHubReviewSubmitRequest, signal?: AbortSignal): Promise<GitHubReview>
+  /** Update a pull request's own fields. */
+  updatePullRequest(request: GitHubPullRequestUpdateRequest, signal?: AbortSignal): Promise<GitHubPullRequest>
+  /** Request review from users and/or teams. */
+  requestReviewers(request: GitHubReviewersRequest, signal?: AbortSignal): Promise<void>
+  /** Apply labels; returns the resulting label set. */
+  setLabels(request: GitHubLabelsRequest, signal?: AbortSignal): Promise<readonly string[]>
   createIssue(request: GitHubIssueCreateRequest, signal?: AbortSignal): Promise<GitHubIssue>
   createComment(request: GitHubCommentCreateRequest, signal?: AbortSignal): Promise<GitHubComment>
   createPullRequest(request: GitHubPullRequestCreateRequest, signal?: AbortSignal): Promise<GitHubPullRequestCreateResult>

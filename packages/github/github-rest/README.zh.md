@@ -29,6 +29,7 @@
 - **限流**：携带 `retry-after` 或主配额耗尽证据的 403/429 映射为 `GITHUB_RATE_LIMITED { retryAfterMs }`。provider **绝不自动重试**——该决策归调用方（seam 契约）。
 - **错误映射**：401 → `GITHUB_AUTH`、404 与 410 → `GITHUB_NOT_FOUND`（410 是 Actions 日志过期时的返回——那是"不存在"，不是传输故障）、422 → `GITHUB_VALIDATION`（原样保留 API 消息）、中止 → `GITHUB_ABORTED`、传输失败 → `GITHUB_PROVIDER_NETWORK`、其余 → `GITHUB_PROVIDER_HTTP`。
 - **CI 失败证据**（ADR-0015）：annotation 优先；只有当失败的 check run 没报 annotation（或调用方显式要求）时才去取 job 日志。日志端点会 302 到对象存储，我们**手动跟随且不带 `Authorization` 头**——签名 URL 自带授权，把用户 token 转发给存储域等于泄露凭据。`details_url` 指不出 Actions job 的 run 就没有日志。
+- **审查写**（M10）：`POST /pulls/{n}/reviews` 提交审查（行级评论的 side 映射为线上的 `LEFT`/`RIGHT`）、`PATCH /pulls/{n}` 改字段、`POST /pulls/{n}/requested_reviewers` 指派、label 用 `POST`（追加）或 `PUT`（替换）。GitHub 对"批准自己 PR"那句干巴巴的 422 会被改写成说清缘由的人话。
 - **幂等 PR 创建**（ADR-0004）：先按精确 head/base 查开放 PR（命中即返回 `created: false`）；未命中才 POST；竞态落败（422 "already exists"）时再查一次并返回胜者的 PR。
 
 ## 测试

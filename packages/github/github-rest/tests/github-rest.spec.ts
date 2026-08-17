@@ -760,6 +760,163 @@ describe('RestGitHubProvider CI failure evidence (ADR-0015)', () => {
   })
 })
 
+describe('RestGitHubProvider review writes and lifecycle (M10)', () => {
+  it('submits a review with inline comments, mapping sides to the wire casing', async () => {
+    const { fetch: fetchImpl, calls } = recordingFetch(() => jsonResponse({ ...RAW_REVIEW_APPROVED, state: 'COMMENTED' }))
+    const review = await makeProvider(fetchImpl).submitReview({
+      item: item(5),
+      event: 'COMMENT',
+      body: 'a few notes',
+      comments: [
+        { path: 'src/a.ts', line: 42, body: 'this leaks' },
+        { path: 'src/b.ts', line: 7, side: 'left', body: 'was wrong before' },
+        { path: 'src/c.ts', line: 9, side: 'right', body: 'and this one' },
+      ],
+    })
+    expect(calls[0]!.url).toBe(`${API}/repos/octo/hello-world/pulls/5/reviews`)
+    expect(calls[0]!.method).toBe('POST')
+    expect(JSON.parse(calls[0]!.body!)).toEqual({
+      event: 'COMMENT',
+      body: 'a few notes',
+      comments: [
+        { path: 'src/a.ts', line: 42, body: 'this leaks' },
+        { path: 'src/b.ts', line: 7, body: 'was wrong before', side: 'LEFT' },
+        { path: 'src/c.ts', line: 9, body: 'and this one', side: 'RIGHT' },
+      ],
+    })
+    expect(review.state).toBe('commented')
+  })
+
+  it('submits a bare verdict with neither body nor comments', async () => {
+    const { fetch: fetchImpl, calls } = recordingFetch(() => jsonResponse(RAW_REVIEW_APPROVED))
+    await makeProvider(fetchImpl).submitReview({ item: item(5), event: 'APPROVE' })
+    expect(JSON.parse(calls[0]!.body!)).toEqual({ event: 'APPROVE' })
+  })
+
+  it('explains GitHub\'s refusal to let you approve your own pull request', async () => {
+    const { fetch: fetchImpl } = recordingFetch(() =>
+      jsonResponse({ message: 'Can not approve your own pull request' }, { status: 422 }))
+    await expect(makeProvider(fetchImpl).submitReview({ item: item(5), event: 'APPROVE' }))
+      .rejects.toThrow(/does not allow APPROVE on your own pull request/)
+  })
+
+  it.each([
+    ['a comment event', 'COMMENT' as const, 'Can not approve your own pull request'],
+    ['an unrelated validation failure', 'APPROVE' as const, 'Body is too long'],
+  ])('leaves %s untouched by the self-approval explanation', async (_label, event, message) => {
+    const { fetch: fetchImpl } = recordingFetch(() => jsonResponse({ message }, { status: 422 }))
+    await expect(makeProvider(fetchImpl).submitReview({ item: item(5), event }))
+      .rejects.toThrow(expect.objectContaining({ code: 'GITHUB_VALIDATION' }))
+    await expect(makeProvider(fetchImpl).submitReview({ item: item(5), event }))
+      .rejects.not.toThrow(/does not allow/)
+  })
+
+  it('propagates a non-validation submission failure unchanged', async () => {
+    const { fetch: fetchImpl } = recordingFetch(() => jsonResponse({ message: 'boom' }, { status: 500 }))
+    await expect(makeProvider(fetchImpl).submitReview({ item: item(5), event: 'COMMENT' }))
+      .rejects.toThrow(expect.objectContaining({ code: 'GITHUB_PROVIDER_HTTP' }))
+  })
+
+  it('PATCHes only the fields the caller supplied', async () => {
+    const { fetch: fetchImpl, calls } = recordingFetch(() => jsonResponse(RAW_PR_OPEN))
+    await makeProvider(fetchImpl).updatePullRequest({ item: item(5), title: 'Renamed', state: 'closed' })
+    expect(calls[0]!.method).toBe('PATCH')
+    expect(calls[0]!.url).toBe(`${API}/repos/octo/hello-world/pulls/5`)
+    expect(JSON.parse(calls[0]!.body!)).toEqual({ title: 'Renamed', state: 'closed' })
+  })
+
+  it('retargets a pull request at another base and rewrites its body', async () => {
+    const { fetch: fetchImpl, calls } = recordingFetch(() => jsonResponse(RAW_PR_OPEN))
+    await makeProvider(fetchImpl).updatePullRequest({ item: item(5), body: 'new body', base: 'develop' })
+    expect(JSON.parse(calls[0]!.body!)).toEqual({ body: 'new body', base: 'develop' })
+  })
+
+  it('requests reviewers from users and teams', async () => {
+    const { fetch: fetchImpl, calls } = recordingFetch(() => jsonResponse({}))
+    await makeProvider(fetchImpl).requestReviewers({ item: item(5), reviewers: ['alice'], teamReviewers: ['core'] })
+    expect(calls[0]!.url).toBe(`${API}/repos/octo/hello-world/pulls/5/requested_reviewers`)
+    expect(JSON.parse(calls[0]!.body!)).toEqual({ reviewers: ['alice'], team_reviewers: ['core'] })
+  })
+
+  it('omits absent reviewer groups rather than sending empty arrays', async () => {
+    const { fetch: fetchImpl, calls } = recordingFetch(() => jsonResponse({}))
+    await makeProvider(fetchImpl).requestReviewers({ item: item(5) })
+    expect(JSON.parse(calls[0]!.body!)).toEqual({})
+  })
+
+  it.each([
+    ['adds with POST by default', undefined, 'POST'],
+    ['adds with POST when told to add', 'add' as const, 'POST'],
+    ['replaces with PUT when told to set', 'set' as const, 'PUT'],
+  ])('%s', async (_label, mode, method) => {
+    const { fetch: fetchImpl, calls } = recordingFetch(() => jsonResponse([{ name: 'bug' }, {}]))
+    const labels = await makeProvider(fetchImpl).setLabels({
+      item: item(5),
+      labels: ['bug'],
+      ...mode === undefined ? {} : { mode },
+    })
+    expect(calls[0]!.method).toBe(method)
+    expect(calls[0]!.url).toBe(`${API}/repos/octo/hello-world/issues/5/labels`)
+    // A nameless label entry drops rather than becoming undefined in the result.
+    expect(labels).toEqual(['bug'])
+  })
+
+  it('lists pull requests, qualifying a bare head branch with the owner', async () => {
+    const { fetch: fetchImpl, calls } = recordingFetch(() => jsonResponse([RAW_PR_OPEN, RAW_PR_MERGED]))
+    const prs = await makeProvider(fetchImpl).listPullRequests({
+      repo: repo(),
+      state: 'all',
+      head: 'feat/x',
+      base: 'main',
+      maxResults: 2,
+    })
+    const url = new URL(calls[0]!.url)
+    expect(url.searchParams.get('state')).toBe('all')
+    expect(url.searchParams.get('head')).toBe('octo:feat/x')
+    expect(url.searchParams.get('base')).toBe('main')
+    expect(prs.map(pr => pr.state)).toEqual(['open', 'merged'])
+  })
+
+  it('defaults a listing to open pull requests with no branch filters', async () => {
+    const { fetch: fetchImpl, calls } = recordingFetch(() => jsonResponse([RAW_PR_OPEN]))
+    await makeProvider(fetchImpl).listPullRequests({ repo: repo() })
+    const url = new URL(calls[0]!.url)
+    expect(url.searchParams.get('state')).toBe('open')
+    expect(url.searchParams.get('head')).toBeNull()
+    expect(url.searchParams.get('per_page')).toBe('100')
+  })
+
+  it.each([
+    ['clean', 'clean', true, []],
+    ['dirty', 'dirty', false, ['the branch has conflicts with its base']],
+    ['blocked', 'blocked', false, ['a branch protection requirement is not satisfied (required review or required check)']],
+    ['unstable', 'unstable', true, ['a non-required check is failing']],
+    ['behind', 'behind', true, ['the branch is behind its base and must be updated first']],
+    ['draft', 'draft', false, ['the pull request is still a draft']],
+    ['an unrecognized state', 'something_new', undefined, ['GitHub has not finished computing mergeability — retry shortly']],
+  ])('reads mergeability for %s', async (_label, state, mergeable, blockedBy) => {
+    const { fetch: fetchImpl } = recordingFetch(() =>
+      jsonResponse({ ...RAW_PR_OPEN, mergeable_state: state, ...mergeable === undefined ? {} : { mergeable } }))
+    const result = await makeProvider(fetchImpl).getMergeability(item(5))
+    expect(result.state).toBe(state === 'something_new' ? 'unknown' : state)
+    expect(result.blockedBy).toEqual(blockedBy)
+  })
+
+  it('reads a reply with no mergeable_state at all as unknown', async () => {
+    const { fetch: fetchImpl } = recordingFetch(() => jsonResponse(RAW_PR_OPEN))
+    const result = await makeProvider(fetchImpl).getMergeability(item(5))
+    expect(result.state).toBe('unknown')
+    expect(result.mergeable).toBeUndefined()
+  })
+
+  it('trusts GitHub\'s boolean over a clean label when the two disagree', async () => {
+    const { fetch: fetchImpl } = recordingFetch(() =>
+      jsonResponse({ ...RAW_PR_OPEN, mergeable_state: 'clean', mergeable: false }))
+    const result = await makeProvider(fetchImpl).getMergeability(item(5))
+    expect(result.blockedBy).toEqual(['GitHub reports the pull request as not mergeable'])
+  })
+})
+
 describe('restTextRequest', () => {
   it('returns the body directly when the endpoint does not redirect', async () => {
     const { fetch: fetchImpl } = recordingFetch(() => textResponse('inline log', 200))

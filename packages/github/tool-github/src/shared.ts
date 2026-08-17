@@ -19,6 +19,7 @@ export interface ResolvedToolGitHubConfig {
   readonly logMaxChars: number
   readonly reviewMaxFiles: number
   readonly reviewMaxPatchChars: number
+  readonly reviewVerdicts: boolean
   readonly timeoutMs: number
 }
 

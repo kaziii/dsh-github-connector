@@ -20,9 +20,9 @@ export interface RestTransport {
   readonly fetch: typeof globalThis.fetch
 }
 
-/** Options of one JSON request. */
+/** Options of one JSON request. `PATCH`/`PUT` carry the update and label writes (M10). */
 export interface RestRequestOptions {
-  readonly method?: 'GET' | 'POST'
+  readonly method?: 'GET' | 'POST' | 'PATCH' | 'PUT'
   /** Query parameters; `undefined` values are omitted. */
   readonly query?: Readonly<Record<string, string | number | undefined>>
   /** JSON request body (POST). */
