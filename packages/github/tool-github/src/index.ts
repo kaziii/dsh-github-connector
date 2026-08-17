@@ -16,6 +16,7 @@ import z from '@deepseek-ai/schemastery'
 import { applyGitHubSearchTool } from './search.ts'
 import { applyGitHubIssueReadTool, applyGitHubPrReadTool } from './read.ts'
 import { applyGitHubPrReviewTool } from './review.ts'
+import { applyGitHubPrListTool, applyGitHubReviewWriteTools } from './review-write.ts'
 import { applyGitHubWriteTools, installWriteApprovalGate } from './write.ts'
 import type { ResolvedToolGitHubConfig } from './shared.ts'
 
@@ -34,6 +35,16 @@ export {
   type PullRequestReadPart,
 } from './read.ts'
 export { applyGitHubPrReviewTool, formatReviewBrief, REVIEW_DIMENSIONS, type ReviewBriefValue } from './review.ts'
+export {
+  allowedReviewEvents,
+  applyGitHubPrListTool,
+  applyGitHubReviewWriteTools,
+  formatPrList,
+  prAssignApprovalReason,
+  prUpdateApprovalReason,
+  REVIEW_VERDICT_EVENTS,
+  reviewSubmitApprovalReason,
+} from './review-write.ts'
 export { applyGitHubWriteTools, GITHUB_WRITE_TOOLS, installWriteApprovalGate, presentPrCreateResult, prCreateMetaFromResult } from './write.ts'
 export { parseRepoInput, preview, repoLabel, runGitHub, toModelError, type ResolvedToolGitHubConfig } from './shared.ts'
 
@@ -62,6 +73,14 @@ export interface Config {
   reviewMaxFiles?: number
   /** Tool-owned review budget: max total patch characters in a brief. Defaults to 120000. */
   reviewMaxPatchChars?: number
+  /**
+   * Let the model submit APPROVE / REQUEST_CHANGES reviews under the user's own
+   * GitHub account. **Defaults to false** (ADR-0014): those two change whether a
+   * PR is blocked and read to collaborators as the user's judgement, so the
+   * capability is opt-in rather than approval-gated only. Commenting is always
+   * available. Ignored entirely when `write` is off.
+   */
+  reviewVerdicts?: boolean
   /** Cooperative timeout budget (ms) attached to every github tool. Defaults to 30000. */
   timeoutMs?: number
 }
@@ -77,6 +96,7 @@ export const Config: z<Config> = z.object({
   logMaxChars: z.number().default(8000),
   reviewMaxFiles: z.number().default(60),
   reviewMaxPatchChars: z.number().default(120000),
+  reviewVerdicts: z.boolean().default(false),
   timeoutMs: z.number().default(30000),
 })
 
@@ -116,8 +136,10 @@ export function apply(ctx: Context, config: Config): void {
   applyGitHubIssueReadTool(ctx, resolved)
   applyGitHubPrReadTool(ctx, resolved)
   applyGitHubPrReviewTool(ctx, resolved)
+  applyGitHubPrListTool(ctx, resolved)
   if (resolved.write) {
     applyGitHubWriteTools(ctx, resolved)
+    applyGitHubReviewWriteTools(ctx, resolved)
     installWriteApprovalGate(ctx)
   }
 }

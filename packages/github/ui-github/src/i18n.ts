@@ -40,6 +40,7 @@ export interface UiCatalog {
   readonly openOnGitHub: string
   readonly mergeConfirm: (number: number, methodLabel: string) => string
   readonly mergeFailed: (message: string) => string
+  readonly mergeBlocked: (reasons: readonly string[]) => string
   readonly mergedBanner: (number: number) => string
 }
 
@@ -87,6 +88,7 @@ const EN: UiCatalog = Object.freeze<UiCatalog>({
   openOnGitHub: 'Open on GitHub',
   mergeConfirm: (number, methodLabel) => `Merge PR #${number} (${methodLabel})? This cannot be undone.`,
   mergeFailed: message => `Merge failed: ${message}`,
+  mergeBlocked: reasons => `Cannot merge yet: ${reasons.join('; ')}`,
   mergedBanner: number => `#${number} merged`,
 })
 
@@ -131,6 +133,7 @@ const ZH_CN: UiCatalog = Object.freeze<UiCatalog>({
   openOnGitHub: '在 GitHub 打开',
   mergeConfirm: (number, methodLabel) => `确定以 ${methodLabel} 方式合并 PR #${number}？此操作不可撤销。`,
   mergeFailed: message => `合并失败：${message}`,
+  mergeBlocked: reasons => `暂时无法合并：${reasons.join('；')}`,
   mergedBanner: number => `#${number} 已合并`,
 })
 

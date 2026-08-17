@@ -283,6 +283,12 @@ export function PrStatusBar(props: PrStatusBarProps): ReactElement | null {
       setNotice(catalog.mergeFailed(result.error.message))
       return
     }
+    // The host refuses a merge it already knows cannot succeed, and hands back
+    // the reasons instead of an error (M10) — show them where the button is.
+    if (!result.value.merged && result.value.blockedBy !== undefined && result.value.blockedBy.length > 0) {
+      setNotice(catalog.mergeBlocked(result.value.blockedBy))
+      return
+    }
     const refreshed = await remote.githubConnect.refreshFlowState({ sessionId: shell.sessionId() })
     if (refreshed.ok) apply(refreshed.value)
   }, [remote, shell, catalog, apply])

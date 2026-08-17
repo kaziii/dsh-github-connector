@@ -57,7 +57,7 @@ declare module '@deepseek-ai/dsh-typert-protocol/types' {
     // pass `undefined` fields freely — they never reach the wire.
     'githubConnect/prDraft': (request: { sessionId?: string | undefined }) => Promise<RemoteResult<PrDraft>>
     'githubConnect/createPr': (request: { title: string, body?: string, base?: string, sessionId?: string | undefined }) => Promise<RemoteResult<CreatePrResult>>
-    'githubConnect/mergePr': (request: { number: number, method: MergeMethod, sessionId?: string | undefined }) => Promise<RemoteResult<{ merged: boolean, sha?: string }>>
+    'githubConnect/mergePr': (request: { number: number, method: MergeMethod, sessionId?: string | undefined }) => Promise<RemoteResult<{ merged: boolean, sha?: string, blockedBy?: readonly string[] }>>
     'githubConnect/prChecks': (number: number, sessionId: string | undefined) => Promise<RemoteResult<ChecksSummary | undefined>>
     'githubConnect/refreshFlowState': (request: { sessionId?: string | undefined }) => Promise<RemoteResult<GitHubFlowState>>
   }

@@ -36,6 +36,17 @@
             ]
           },
           {
+            "name": "github_pr_assign",
+            "description": "Request review from users and/or apply labels on a GitHub pull request. The user is asked to approve first.",
+            "parameters": [
+              "label_mode:add|set",
+              "labels",
+              "number",
+              "repo",
+              "reviewers"
+            ]
+          },
+          {
             "name": "github_pr_create",
             "description": "Open a GitHub pull request from an existing branch. Idempotent: if an open PR for the same head/base already exists it is returned instead of failing. The user is asked to approve before anything is created.",
             "parameters": [
@@ -48,12 +59,23 @@
             ]
           },
           {
+            "name": "github_pr_list",
+            "description": "List pull requests of a repository, optionally filtered by state and by head/base branch. Returns lean rows; pass a number to github_pr_read for detail.",
+            "parameters": [
+              "base",
+              "head",
+              "max_results",
+              "repo",
+              "state:open|closed|all"
+            ]
+          },
+          {
             "name": "github_pr_read",
             "description": "Read one GitHub pull request. part=metadata (default) returns title/state/branches/body; part=diff returns the changed files with patches (budgeted); part=comments returns the conversation; part=reviews returns submitted review verdicts plus the line-anchored review comments to act on; part=checks returns CI check runs; part=ci-failures returns why the failing checks failed (annotations, or a budgeted log tail).",
             "parameters": [
               "max_comments",
               "number",
-              "part",
+              "part:metadata|diff|comments|reviews|checks|ci-failures",
               "repo"
             ]
           },
@@ -67,10 +89,33 @@
             ]
           },
           {
+            "name": "github_pr_review_submit",
+            "description": "Submit a review on a GitHub pull request, with an optional summary and inline comments anchored to file lines. Only COMMENT is available in this deployment; approving and requesting changes are switched off. The user is asked to approve before anything is posted.",
+            "parameters": [
+              "body",
+              "comments",
+              "event:COMMENT",
+              "number",
+              "repo"
+            ]
+          },
+          {
+            "name": "github_pr_update",
+            "description": "Update a GitHub pull request's title, body, base branch, or open/closed state. Draft status cannot be changed through this API. The user is asked to approve first.",
+            "parameters": [
+              "base",
+              "body",
+              "number",
+              "repo",
+              "state:open|closed",
+              "title"
+            ]
+          },
+          {
             "name": "github_search",
             "description": "Search GitHub for issues, pull requests, repositories, or code. Returns a lean list of hits; read an issue or PR directly with github_issue_read / github_pr_read using the owner/repo and number of a hit.",
             "parameters": [
-              "kind",
+              "kind:issues|pull-requests|repositories|code",
               "max_results",
               "query"
             ]
@@ -87,12 +132,23 @@
             ]
           },
           {
+            "name": "github_pr_list",
+            "description": "List pull requests of a repository, optionally filtered by state and by head/base branch. Returns lean rows; pass a number to github_pr_read for detail.",
+            "parameters": [
+              "base",
+              "head",
+              "max_results",
+              "repo",
+              "state:open|closed|all"
+            ]
+          },
+          {
             "name": "github_pr_read",
             "description": "Read one GitHub pull request. part=metadata (default) returns title/state/branches/body; part=diff returns the changed files with patches (budgeted); part=comments returns the conversation; part=reviews returns submitted review verdicts plus the line-anchored review comments to act on; part=checks returns CI check runs; part=ci-failures returns why the failing checks failed (annotations, or a budgeted log tail).",
             "parameters": [
               "max_comments",
               "number",
-              "part",
+              "part:metadata|diff|comments|reviews|checks|ci-failures",
               "repo"
             ]
           },
@@ -109,7 +165,122 @@
             "name": "github_search",
             "description": "Search GitHub for issues, pull requests, repositories, or code. Returns a lean list of hits; read an issue or PR directly with github_issue_read / github_pr_read using the owner/repo and number of a hit.",
             "parameters": [
-              "kind",
+              "kind:issues|pull-requests|repositories|code",
+              "max_results",
+              "query"
+            ]
+          }
+        ],
+        "verdicts-on": [
+          {
+            "name": "github_issue_comment",
+            "description": "Post a comment on a GitHub issue or pull request. The user is asked to approve before anything is posted.",
+            "parameters": [
+              "body",
+              "number",
+              "repo"
+            ]
+          },
+          {
+            "name": "github_issue_create",
+            "description": "Create a GitHub issue. The user is asked to approve before anything is created.",
+            "parameters": [
+              "body",
+              "labels",
+              "repo",
+              "title"
+            ]
+          },
+          {
+            "name": "github_issue_read",
+            "description": "Read one GitHub issue: title, state, labels, body, and its conversation comments.",
+            "parameters": [
+              "max_comments",
+              "number",
+              "repo"
+            ]
+          },
+          {
+            "name": "github_pr_assign",
+            "description": "Request review from users and/or apply labels on a GitHub pull request. The user is asked to approve first.",
+            "parameters": [
+              "label_mode:add|set",
+              "labels",
+              "number",
+              "repo",
+              "reviewers"
+            ]
+          },
+          {
+            "name": "github_pr_create",
+            "description": "Open a GitHub pull request from an existing branch. Idempotent: if an open PR for the same head/base already exists it is returned instead of failing. The user is asked to approve before anything is created.",
+            "parameters": [
+              "base",
+              "body",
+              "draft",
+              "head",
+              "repo",
+              "title"
+            ]
+          },
+          {
+            "name": "github_pr_list",
+            "description": "List pull requests of a repository, optionally filtered by state and by head/base branch. Returns lean rows; pass a number to github_pr_read for detail.",
+            "parameters": [
+              "base",
+              "head",
+              "max_results",
+              "repo",
+              "state:open|closed|all"
+            ]
+          },
+          {
+            "name": "github_pr_read",
+            "description": "Read one GitHub pull request. part=metadata (default) returns title/state/branches/body; part=diff returns the changed files with patches (budgeted); part=comments returns the conversation; part=reviews returns submitted review verdicts plus the line-anchored review comments to act on; part=checks returns CI check runs; part=ci-failures returns why the failing checks failed (annotations, or a budgeted log tail).",
+            "parameters": [
+              "max_comments",
+              "number",
+              "part:metadata|diff|comments|reviews|checks|ci-failures",
+              "repo"
+            ]
+          },
+          {
+            "name": "github_pr_review",
+            "description": "Assemble the structured review task for one GitHub pull request: its diff, the review dimensions that apply to these particular changes, the checklist under each, the severity scale, and the shape every finding must take. Returns evidence and a contract — the findings are yours to produce. Use this instead of reading a diff and improvising when asked to review a PR.",
+            "parameters": [
+              "dimensions",
+              "number",
+              "repo"
+            ]
+          },
+          {
+            "name": "github_pr_review_submit",
+            "description": "Submit a review on a GitHub pull request, with an optional summary and inline comments anchored to file lines. APPROVE and REQUEST_CHANGES speak with the user's own voice and change whether the PR is blocked — prefer COMMENT unless the user asked for a verdict. GitHub refuses either one on the user's own pull request. The user is asked to approve before anything is posted.",
+            "parameters": [
+              "body",
+              "comments",
+              "event:COMMENT|APPROVE|REQUEST_CHANGES",
+              "number",
+              "repo"
+            ]
+          },
+          {
+            "name": "github_pr_update",
+            "description": "Update a GitHub pull request's title, body, base branch, or open/closed state. Draft status cannot be changed through this API. The user is asked to approve first.",
+            "parameters": [
+              "base",
+              "body",
+              "number",
+              "repo",
+              "state:open|closed",
+              "title"
+            ]
+          },
+          {
+            "name": "github_search",
+            "description": "Search GitHub for issues, pull requests, repositories, or code. Returns a lean list of hits; read an issue or PR directly with github_issue_read / github_pr_read using the owner/repo and number of a hit.",
+            "parameters": [
+              "kind:issues|pull-requests|repositories|code",
               "max_results",
               "query"
             ]

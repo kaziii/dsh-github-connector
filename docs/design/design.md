@@ -1,6 +1,6 @@
 # dsh GitHub 连接器 — 设计文档
 
-> 状态：v1（M1–M7）已实现；v2「审查闭环」（范围决策见 [ADR-0012](../adr/0012-pr-review-loop-enters-scope.md)）：M8（审查读侧）与 M9（结构化审查）已实现，M10 设计定稿、未开工。本文档是与 dsh 仓库调研结论一起沉淀的完整方案，随实现演进；客户端外壳的对接方式见 [ADR-0007](../adr/0007-ui-binds-client-shell-via-port.md)，依赖 dsh 宿主环境的两项手工验收仍挂起（见[执行计划](../plans/execution-plan.md) M3/M6）。
+> 状态：v1（M1–M7）已实现；v2「审查闭环」（范围决策见 [ADR-0012](../adr/0012-pr-review-loop-enters-scope.md)）：M8–M10 全部已实现（审查读侧 / 结构化审查 / 审查回写与生命周期），v2 闭环完成；仅 M10 的真实仓库手工验收挂起。本文档是与 dsh 仓库调研结论一起沉淀的完整方案，随实现演进；客户端外壳的对接方式见 [ADR-0007](../adr/0007-ui-binds-client-shell-via-port.md)，依赖 dsh 宿主环境的两项手工验收仍挂起（见[执行计划](../plans/execution-plan.md) M3/M6）。
 > 实施拆解见[执行计划](../plans/execution-plan.md)；关键取舍的决策记录见 [ADR](../adr/README.md)。
 
 ## 1. 目标与产品体验
@@ -85,13 +85,14 @@ PR 已合并                      →  确认后收起
 - 落地名：seam 上是 `buildReviewBrief(item, request)`；纯函数 `classifyFile` / `changedLines` / `routeDimensions` 单独导出，无需 provider 即可测
 - 预算独立于 `github_pr_read`（`reviewMaxFiles` / `reviewMaxPatchChars` = `60` / `120000`），不复用其默认值
 
-**写侧（M10）**
+**写侧（M10，已实现）**
 
-- `GitHubReviewSubmitRequest { item, event, body?, comments? }`，`event: 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES'`；`comments` 为 `{ path, line, side, body }[]`
-- `APPROVE` / `REQUEST_CHANGES` 受 preset 开关 `reviewVerdicts`（默认 `false`）门控，开启后走强制勾选确认（[ADR-0014](../adr/0014-review-verdicts-gated-behind-explicit-opt-in.md)）
-- PR 生命周期：`updatePullRequest`（title / body / base / draft→ready / state）、`requestReviewers`、`setLabels`、`listPullRequests`
-- `readMergeability(item) → { mergeable?, state, blockedBy }`：`mergePr` 的前置检查，不可合并时前端就地提示，不发 `PUT /merge`
-- 错误映射补充：approve 自己创建的 PR 返回 422，映射为对模型可读的说明而非裸 `GITHUB_VALIDATION`；Actions 日志过期返回 410，映射为 `GITHUB_NOT_FOUND`
+- `GitHubReviewSubmitRequest { item, event, body?, comments? }`，`event: 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES'`；`comments` 为 `{ path, line, side?, body }[]`，seam 校验锚点（路径非空、行号为正整数）
+- `APPROVE` / `REQUEST_CHANGES` 受 preset 开关 `reviewVerdicts`（默认 `false`）门控，关闭时 event 枚举在 **schema 层**就只有 `COMMENT`（[ADR-0014](../adr/0014-review-verdicts-gated-behind-explicit-opt-in.md)）。该 ADR 设想的"强制勾选确认"无法落地，退化为 reason 文本——原因见[执行计划 M10 实现注记](../plans/execution-plan.md)
+- PR 生命周期：`updatePullRequest`（title / body / base / state）、`requestReviewers`、`setLabels`（add / set）、`listPullRequests`（seam 层封顶）
+- **draft→ready 不支持**：REST 改不了 draft 状态（只有 GraphQL 的 `markPullRequestReadyForReview`，而 GraphQL 仍在 §10 排除项内）
+- `getMergeability(item) → { mergeable?, state, blockedBy }`：`mergePr` 的前置检查，不可合并时**不发 `PUT /merge`**，把 `blockedBy` 交给状态条就地提示
+- 错误映射补充：approve 自己创建的 PR 返回 422，改写为对模型可读的说明而非裸 `GITHUB_VALIDATION`；Actions 日志过期返回 410，映射为 `GITHUB_NOT_FOUND`
 
 ## 5. 认证：GitHub Device Flow
 

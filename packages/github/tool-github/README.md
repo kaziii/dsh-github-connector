@@ -10,9 +10,13 @@ The **model-facing `github_*` tool suite** over [`dsh-github`](../github/README.
 | `github_issue_read` | Title, state, labels, body, plus capped aggregated comments. |
 | `github_pr_read` | Split into on-demand parts: `metadata` (default) / `diff` / `comments` / `reviews` / `checks` / `ci-failures` — one call never pays for data the model did not ask for. |
 | `github_pr_review` | Assemble the structured review task for one PR: diff (once), the dimensions that apply to these changes, each one's checklist, the severity scale, and the finding contract. Evidence and a contract — not a verdict (ADR-0013). |
+| `github_pr_list` | List a repository's pull requests, filtered by state and head/base. Read-only. |
 | `github_issue_create` | Write, approval-gated. |
 | `github_issue_comment` | Write, approval-gated. |
 | `github_pr_create` | Write, approval-gated, idempotent (an already-open PR for the same head/base is a normal answer, not an error). |
+| `github_pr_review_submit` | Write, approval-gated. Submits a review with inline comments. `APPROVE` / `REQUEST_CHANGES` exist only when `reviewVerdicts` is on (ADR-0014). |
+| `github_pr_update` | Write, approval-gated. Title, body, base branch, open/closed. |
+| `github_pr_assign` | Write, approval-gated. Request reviewers, apply labels. |
 
 ## Configuration
 
@@ -24,7 +28,19 @@ The **model-facing `github_*` tool suite** over [`dsh-github`](../github/README.
 | `diffMaxFiles` / `diffMaxPatchChars` | `50` / `60000` | **Tool-owned** diff budgets (ADR-0005): held here, passed to the seam, enforced there. |
 | `logMaxLines` / `logMaxChars` | `80` / `8000` | **Tool-owned** CI log budgets, same mechanism. Only ever applied to a log TAIL (ADR-0015). |
 | `reviewMaxFiles` / `reviewMaxPatchChars` | `60` / `120000` | **Tool-owned** review-brief budgets. Deliberately their own numbers, not the diff budgets above: a review reads wider than a plain diff read (ADR-0013). |
+| `reviewVerdicts` | `false` | Whether `APPROVE` / `REQUEST_CHANGES` exist at all. Off by default (ADR-0014) — see below. |
 | `timeoutMs` | `30000` | Cooperative timeout attached to every tool (`dsh-timeout-policy` enforces). |
+
+## Review verdicts are off by default (ADR-0014)
+
+Submitting a review is this package's first operation with a **social** consequence: `APPROVE` and `REQUEST_CHANGES` go out under the user's own account, read to collaborators as their judgement, and change whether the PR is blocked. Approval-per-call is the wrong last line of defence for that — under approval fatigue, one distracted "yes" is all it takes.
+
+So the capability itself is opt-in. With `reviewVerdicts` off (the default), the event enum contains only `COMMENT`: the model never sees that approving is possible, so it cannot attempt it and be refused. Turning the switch on widens the enum, and each submission still passes the approval waterfall with a reason that names the event and its consequence.
+
+Two things worth knowing:
+
+- GitHub refuses `APPROVE` and `REQUEST_CHANGES` on **your own** pull request. The status bar's [AI review] path is exactly that case, so it can only ever produce `COMMENT` — the provider translates the platform's terse 422 into a sentence saying so.
+- The host's `PreToolDecision` carries only a reason string, with no risk level to raise, so the wording of that reason *is* the whole confirmation layer available here. See the M10 implementation note in the execution plan.
 
 ## Approval flow (writes)
 

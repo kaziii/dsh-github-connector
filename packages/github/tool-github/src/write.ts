@@ -11,12 +11,16 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool, type ToolResult } from '@deepseek-ai/dsh-tools'
 import { parseRepoInput, preview, repoLabel, runGitHub, type ResolvedToolGitHubConfig } from './shared.ts'
+import { prAssignApprovalReason, prUpdateApprovalReason, reviewSubmitApprovalReason } from './review-write.ts'
 
 /** The gated tool names, exported so tests and hosts can recognize the set. */
 export const GITHUB_WRITE_TOOLS: ReadonlySet<string> = new Set([
   'github_issue_create',
   'github_issue_comment',
   'github_pr_create',
+  'github_pr_review_submit',
+  'github_pr_update',
+  'github_pr_assign',
 ])
 
 /** Read one string argument defensively (pre-validation raw args). */
@@ -43,6 +47,9 @@ const APPROVAL_REASONS: Record<string, (args: unknown) => string> = {
     `Comment on GitHub ${argString(args, 'repo') ?? '?'}#${argNumber(args, 'number') ?? '?'}: ${preview(argString(args, 'body'))}`,
   github_pr_create: args =>
     `Create GitHub pull request in ${argString(args, 'repo') ?? '?'} (${argString(args, 'head') ?? '?'} → ${argString(args, 'base') ?? '?'}): "${argString(args, 'title') ?? '?'}"`,
+  github_pr_review_submit: reviewSubmitApprovalReason,
+  github_pr_update: prUpdateApprovalReason,
+  github_pr_assign: prAssignApprovalReason,
 }
 
 /**

@@ -377,12 +377,21 @@ export class GitHubConnectService extends TypertRemoteService {
   /**
    * Merge one PR — the status bar's [Merge] dropdown, behind the host's
    * irreversible-action confirmation.
+   *
+   * Mergeability is checked FIRST (M10): when GitHub already knows the merge
+   * cannot succeed, no `PUT` is sent and the blockers come back for the status
+   * bar to show in place. A doomed merge should read as "this cannot merge
+   * because X", not as an opaque HTTP failure after the fact.
    * @param request - the PR number, merge strategy, and optional calling session (ADR-0010).
-   * @returns GitHub's merge outcome.
+   * @returns GitHub's merge outcome, or the blockers that stopped it.
    */
   @Remote
-  async mergePr(request: { number: number, method: MergeMethod, sessionId?: string }): Promise<{ merged: boolean, sha?: string }> {
+  async mergePr(request: { number: number, method: MergeMethod, sessionId?: string }): Promise<{ merged: boolean, sha?: string, blockedBy?: readonly string[] }> {
     const facts = await this.repoFacts(this.cwd(request.sessionId))
+    const mergeability = await this.ctx.github.getMergeability({ repo: facts.repo, number: request.number })
+    if (mergeability.state !== 'clean') {
+      return { merged: false, blockedBy: mergeability.blockedBy }
+    }
     const token = await this.requireToken()
     const path = `/repos/${encodeURIComponent(facts.repo.owner)}/${encodeURIComponent(facts.repo.repo)}/pulls/${request.number}/merge`
     const json = await this.api(token, 'PUT', path, { merge_method: request.method }) as { merged?: unknown, sha?: unknown }

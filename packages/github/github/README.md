@@ -25,6 +25,8 @@ Reads and writes are deliberately ONE provider interface (ADR-0003): they share 
 | `getReviews` / `getReviewComments` | Submitted review verdicts, and the line-anchored comments they carry. `GitHubReviewComment` is deliberately NOT `GitHubComment`: it has a path and a line, and you act on it by editing that code. |
 | `getCheckFailures(item, request?, signal?)` | Why the failing checks failed: annotations when the CI tool reported them, otherwise a log **tail** under the consumer-owned `maxLogLines` / `maxLogChars` budgets (ADR-0015). Same honesty rule as `getDiff` — a provider-truncated log alone marks the whole result truncated. |
 | `buildReviewBrief(item, request?, signal?)` | The deterministic half of a structured review (ADR-0013): route the dimensions this change actually warrants, carry its diff **once**, and attach the checklists, severity scale, and finding contract. Routes and packages evidence; never judges. |
+| `getMergeability` / `listPullRequests` | Merge readiness with its blockers spelled out, and a capped pull request listing. |
+| `submitReview` / `updatePullRequest` / `requestReviewers` / `setLabels` | The review-write half. The seam validates inline-comment anchors but does NOT decide whether a verdict is allowed — that policy is about what the MODEL may do, so it lives at the tool layer (ADR-0014). |
 | `createIssue` / `createComment` / `createPullRequest` | Writes. PR creation is idempotent (ADR-0004): an existing open PR for the same head/base comes back with `created: false`. |
 
 Providers register **capabilities**, not tools. `dsh-tool-github` is the only owner of model-facing names, descriptions, prompt guidance, JSON schemas, and presentation.

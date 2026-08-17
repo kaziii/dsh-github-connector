@@ -25,6 +25,8 @@
 | `getReviews` / `getReviewComments` | 已提交的审查裁决，以及它们携带的行级评论。`GitHubReviewComment` 刻意不等同于 `GitHubComment`：它带文件路径与行号，处理方式是去改那段代码。 |
 | `getCheckFailures(item, request?, signal?)` | 失败的检查为什么失败：CI 工具报了 annotation 就用它，否则取受 consumer 持有的 `maxLogLines` / `maxLogChars` 预算约束的日志**尾部**（ADR-0015）。诚实规则同 `getDiff`——单是 provider 侧截断过的日志，就足以让整个结果标记为 truncated。 |
 | `buildReviewBrief(item, request?, signal?)` | 结构化审查的确定性那一半（ADR-0013）：路由出本次改动真正值得审的维度，diff **只带一次**，附上 checklist、严重度口径与 finding 契约。只做路由与证据打包，绝不做判断。 |
+| `getMergeability` / `listPullRequests` | 合并就绪度（连同人话写明的阻塞原因）与受上限约束的 PR 列表。 |
+| `submitReview` / `updatePullRequest` / `requestReviewers` / `setLabels` | 审查写的那一半。seam 校验行级评论的锚点，但**不**决定裁决是否被允许——那条策略管的是"模型可以做什么"，因此归工具层（ADR-0014）。 |
 | `createIssue` / `createComment` / `createPullRequest` | 写操作。PR 创建幂等（ADR-0004）：同 head/base 已有开放 PR 时返回既有 PR，`created: false`。 |
 
 provider 注册的是**能力**而非工具。模型可见的名称、描述、提示词、JSON schema 与呈现均由 `dsh-tool-github` 独家拥有。

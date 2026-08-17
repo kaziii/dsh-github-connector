@@ -185,6 +185,16 @@ function makeProvider(overrides: Partial<GitHubProvider> = {}): GitHubProvider {
     getComments: () => Promise.reject(new Error('unused')),
     getDiff: () => Promise.reject(new Error('unused')),
     getChecks: () => Promise.resolve({ runs: [{ name: 'ci', status: 'completed' as const, conclusion: 'success' as const }] }),
+    getReviews: () => Promise.reject(new Error('unused')),
+    getReviewComments: () => Promise.reject(new Error('unused')),
+    getCheckFailures: () => Promise.reject(new Error('unused')),
+    // Mergeable by default: the merge pre-check (M10) runs before every PUT.
+    getMergeability: () => Promise.resolve({ mergeable: true, state: 'clean' as const, blockedBy: [] }),
+    listPullRequests: () => Promise.reject(new Error('unused')),
+    submitReview: () => Promise.reject(new Error('unused')),
+    updatePullRequest: () => Promise.reject(new Error('unused')),
+    requestReviewers: () => Promise.reject(new Error('unused')),
+    setLabels: () => Promise.reject(new Error('unused')),
     createIssue: () => Promise.reject(new Error('unused')),
     createComment: () => Promise.reject(new Error('unused')),
     createPullRequest: request => Promise.resolve({
@@ -885,6 +895,30 @@ describe('GitHubConnectService buttons', () => {
     await expect(suite.service.mergePr({ number: 5, method: 'squash' })).resolves.toEqual({ merged: true, sha: 'abc123' })
     expect(calls[0]!.url).toBe('https://api.github.com/repos/octo/hello-world/pulls/5/merge')
     expect(JSON.parse(calls[0]!.body!)).toEqual({ merge_method: 'squash' })
+  })
+
+  it('refuses a merge GitHub already knows cannot succeed, without sending the PUT (M10)', async () => {
+    const dir = await makeRepo({ remote: 'git@github.com:octo/hello-world.git', branch: 'feat/x', ahead: 1 })
+    const suite = await mountService({ cwd: dir }, {
+      provider: {
+        getMergeability: () => Promise.resolve({
+          mergeable: false,
+          state: 'dirty' as const,
+          blockedBy: ['the branch has conflicts with its base'],
+        }),
+      },
+    })
+    const { fetch: fetchImpl, calls } = scriptedFetch([{
+      match: () => true,
+      respond: () => jsonResponse({ merged: true }),
+    }])
+    suite.service.fetchImpl = fetchImpl
+    await suite.credentials.set('GITHUB_TOKEN' as CredentialRef, 'gho_1')
+
+    await expect(suite.service.mergePr({ number: 5, method: 'squash' }))
+      .resolves.toEqual({ merged: false, blockedBy: ['the branch has conflicts with its base'] })
+    // The whole point: a doomed merge costs no write request at all.
+    expect(calls).toHaveLength(0)
   })
 
   it('maps merge refusals, auth absence, transport failures, and other HTTP failures', async () => {
