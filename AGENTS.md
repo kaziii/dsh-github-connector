@@ -4,7 +4,7 @@ Coding agent 在本仓库工作的入口上下文。人类贡献者同样适用�
 
 ## 项目一句话
 
-dsh-github-connector：为 [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) 提供 GitHub 连接能力——一键授权（Device Flow）、对话内 PR 工作流（创建 / AI 审查 / 合并）、模型侧 GitHub 工具。**当前状态：v1 已实现（M1–M7），五个包位于 `packages/github/`，可运行示例在 `examples/github-quickstart/`；仅剩依赖 dsh 宿主环境的两项手工验收挂起（见执行计划 M3/M6）。v2「审查闭环」（范围决策见 [ADR-0012](docs/adr/0012-pr-review-loop-enters-scope.md)）：M8 审查读侧已实现（`github_pr_read` 的 `reviews` / `ci-failures` part），M9/M10 未开工。** 常用命令：`pnpm typecheck` / `pnpm test` / `pnpm test:coverage` / `pnpm build` / `pnpm gate:catalog`。
+dsh-github-connector：为 [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) 提供 GitHub 连接能力——一键授权（Device Flow）、对话内 PR 工作流（创建 / AI 审查 / 合并）、模型侧 GitHub 工具。**当前状态：v1 已实现（M1–M7），五个包位于 `packages/github/`，可运行示例在 `examples/github-quickstart/`；仅剩依赖 dsh 宿主环境的两项手工验收挂起（见执行计划 M3/M6）。v2「审查闭环」（范围决策见 [ADR-0012](docs/adr/0012-pr-review-loop-enters-scope.md)）：M8 审查读侧（`github_pr_read` 的 `reviews` / `ci-failures` part）与 M9 结构化审查（`github_pr_review` 工具）已实现，M10 未开工。** 常用命令：`pnpm typecheck` / `pnpm test` / `pnpm test:coverage` / `pnpm build` / `pnpm gate:catalog`。
 
 ## 文档地图（改动前必读）
 

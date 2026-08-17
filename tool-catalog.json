@@ -58,6 +58,15 @@
             ]
           },
           {
+            "name": "github_pr_review",
+            "description": "Assemble the structured review task for one GitHub pull request: its diff, the review dimensions that apply to these particular changes, the checklist under each, the severity scale, and the shape every finding must take. Returns evidence and a contract — the findings are yours to produce. Use this instead of reading a diff and improvising when asked to review a PR.",
+            "parameters": [
+              "dimensions",
+              "number",
+              "repo"
+            ]
+          },
+          {
             "name": "github_search",
             "description": "Search GitHub for issues, pull requests, repositories, or code. Returns a lean list of hits; read an issue or PR directly with github_issue_read / github_pr_read using the owner/repo and number of a hit.",
             "parameters": [
@@ -84,6 +93,15 @@
               "max_comments",
               "number",
               "part",
+              "repo"
+            ]
+          },
+          {
+            "name": "github_pr_review",
+            "description": "Assemble the structured review task for one GitHub pull request: its diff, the review dimensions that apply to these particular changes, the checklist under each, the severity scale, and the shape every finding must take. Returns evidence and a contract — the findings are yours to produce. Use this instead of reading a diff and improvising when asked to review a PR.",
+            "parameters": [
+              "dimensions",
+              "number",
               "repo"
             ]
           },

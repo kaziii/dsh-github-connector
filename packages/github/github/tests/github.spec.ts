@@ -2,7 +2,11 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 import GitHubRuntime, {
+  buildReviewBrief,
+  changedLines,
+  classifyFile,
   GitHubError,
+  routeDimensions,
   type GitHubCheckFailuresResult,
   type GitHubCheckRun,
   type GitHubComment,
@@ -312,6 +316,146 @@ describe('GitHubRuntime ref and budget validation', () => {
   it('validates before resolving the provider, so bad input never reports provider absence', async () => {
     const { github } = await mountGitHub()
     await expect(github.getIssue(item(0))).rejects.toThrow(expect.objectContaining({ code: 'GITHUB_VALIDATION' }))
+  })
+})
+
+describe('review dimension routing (ADR-0013, deterministic half)', () => {
+  function file(path: string, patch?: string): GitHubDiffFile {
+    return { path, status: 'modified', additions: 1, deletions: 0, ...patch === undefined ? {} : { patch } }
+  }
+
+  /** Which dimensions fired, sorted — routing owns the SET, `buildReviewBrief` owns the order. */
+  const applied = (files: readonly GitHubDiffFile[]): string[] => [...routeDimensions(files).keys()].sort()
+
+  it.each([
+    ['a test by suffix', 'src/a.test.ts', 'test'],
+    ['a test by directory', 'tests/helpers.ts', 'test'],
+    ['a __tests__ file', 'src/__tests__/a.ts', 'test'],
+    ['documentation', 'docs/design.md', 'docs'],
+    ['a plain readme', 'README.md', 'docs'],
+    ['a declaration file', 'src/api.d.ts', 'types'],
+    ['a types module', 'src/types.ts', 'types'],
+    ['ordinary source', 'src/a.ts', 'code'],
+    ['another language', 'scripts/run.py', 'code'],
+    ['a binary asset', 'assets/logo.png', 'asset'],
+  ])('classifies %s', (_label, path, kind) => {
+    expect(classifyFile(path)).toBe(kind)
+  })
+
+  it('lets use win over content: a types file under tests/ is a test', () => {
+    expect(classifyFile('tests/types.ts')).toBe('test')
+  })
+
+  it('reads only added and removed lines, never the surrounding context', () => {
+    const patch = ['--- a/src/a.ts', '+++ b/src/a.ts', '@@ -1,3 +1,3 @@', ' const kept = 1', '-const old = 2', '+const fresh = 3'].join('\n')
+    expect(changedLines(patch)).toEqual(['const old = 2', 'const fresh = 3'])
+    expect(changedLines(undefined)).toEqual([])
+  })
+
+  it('routes a docs-only change to comments alone', () => {
+    expect(applied([file('docs/design.md', '+prose')])).toEqual(['comments'])
+  })
+
+  it('asks for tests when source moved but no test file did', () => {
+    const routes = routeDimensions([file('src/a.ts', '+const a = 1')])
+    expect([...routes.keys()].sort()).toEqual(['correctness', 'simplification', 'tests'])
+    expect(routes.get('tests')!.reason).toBe('source changed with no test file touched')
+  })
+
+  it('points the tests dimension at both the tests and the source they cover', () => {
+    const routes = routeDimensions([file('src/a.ts', '+const a = 1'), file('src/a.test.ts', '+expect(a)')])
+    expect(routes.get('tests')).toEqual({
+      reason: '1 test file(s) changed',
+      paths: ['src/a.test.ts', 'src/a.ts'],
+    })
+  })
+
+  it('adds error-handling, types, and comments from the changed lines themselves', () => {
+    const routes = routeDimensions([
+      file('src/a.ts', '+try { go() } catch (error) { ignore() }'),
+      file('src/b.ts', '+interface Shape { x: number }'),
+      file('src/c.ts', '+// explain the why'),
+    ])
+    expect([...routes.keys()].sort()).toEqual(['comments', 'correctness', 'error-handling', 'simplification', 'tests', 'types'])
+    // ...and the brief presents them in a fixed order regardless of routing order.
+    expect(buildReviewBrief(pullRequest(item()), { files: [file('src/a.ts', '+try {} catch (e) {}')], truncated: false })
+      .dimensions.map(d => d.dimension)).toEqual(['correctness', 'tests', 'error-handling', 'simplification'])
+    expect(routes.get('error-handling')!.paths).toEqual(['src/a.ts'])
+    expect(routes.get('types')!.paths).toEqual(['src/b.ts'])
+    expect(routes.get('comments')!.paths).toEqual(['src/c.ts'])
+  })
+
+  it('ignores keywords that only appear in a patch\'s context lines', () => {
+    const patch = ['@@ -1,2 +1,2 @@', ' try { existing() } catch (e) {}', '+const unrelated = 1'].join('\n')
+    expect(applied([file('src/a.ts', patch)])).not.toContain('error-handling')
+  })
+
+  it('routes a declaration file to types even with no patch to inspect', () => {
+    expect(applied([file('src/api.d.ts')])).toContain('types')
+  })
+
+  it('routes nothing when only assets changed', () => {
+    expect(applied([file('assets/logo.png')])).toEqual([])
+    expect(applied([])).toEqual([])
+  })
+
+  it('carries the diff exactly once and lets dimensions reference its paths', () => {
+    const diff: GitHubDiff = { files: [diffFile('src/a.ts', '+const a = 1')], truncated: false }
+    const brief = buildReviewBrief(pullRequest(item()), diff)
+    // Identity, not a copy: six dimensions must cost one diff.
+    expect(brief.diff).toBe(diff)
+    for (const dimension of brief.dimensions) {
+      for (const path of dimension.paths) {
+        expect(diff.files.map(f => f.path)).toContain(path)
+      }
+    }
+  })
+
+  it('honors a caller restriction and keeps presentation order', () => {
+    const diff: GitHubDiff = { files: [diffFile('src/a.ts', '+interface A {}')], truncated: false }
+    const brief = buildReviewBrief(pullRequest(item()), diff, { dimensions: ['types', 'correctness'] })
+    expect(brief.dimensions.map(d => d.dimension)).toEqual(['correctness', 'types'])
+  })
+
+  it('reports a truncated diff as a knowingly partial review', () => {
+    const diff: GitHubDiff = { files: [diffFile('src/a.ts', '+a')], truncated: true }
+    expect(buildReviewBrief(pullRequest(item()), diff).truncated).toBe(true)
+  })
+
+  it('ships a severity scale and an output contract with every brief', () => {
+    const brief = buildReviewBrief(pullRequest(item()), { files: [], truncated: false })
+    expect(brief.severityScale.map(entry => entry.level)).toEqual(['blocker', 'major', 'minor', 'nit'])
+    expect(brief.outputContract.length).toBeGreaterThan(0)
+    expect(brief.dimensions).toEqual([])
+  })
+})
+
+describe('GitHubRuntime buildReviewBrief operation', () => {
+  it('passes the caller budgets to the diff read and assembles the brief', async () => {
+    const budgets: unknown[] = []
+    const { github } = await mountGitHub()
+    github.registerProvider(makeProvider('rest', available, {
+      getDiff: (_item, request) => {
+        budgets.push(request)
+        return Promise.resolve({ files: [diffFile('src/a.ts', '+const a = 1')], truncated: false })
+      },
+    }))
+    const brief = await github.buildReviewBrief(item(), { maxFiles: 9, maxPatchChars: 90 })
+    expect(budgets[0]).toEqual({ maxFiles: 9, maxPatchChars: 90 })
+    expect(brief.pullRequest.title).toBe('pr:rest')
+    expect(brief.dimensions.map(d => d.dimension)).toEqual(['correctness', 'tests', 'simplification'])
+  })
+
+  it('validates the item ref before touching a provider', async () => {
+    const { github } = await mountGitHub()
+    await expect(github.buildReviewBrief(item(0))).rejects.toThrow(expect.objectContaining({ code: 'GITHUB_VALIDATION' }))
+  })
+
+  it('defaults to unrestricted budgets and dimensions', async () => {
+    const { github } = await mountGitHub()
+    github.registerProvider(makeProvider('rest', available))
+    const brief = await github.buildReviewBrief(item())
+    expect(brief.diff).toEqual({ files: [diffFile('a.ts', '+a')], truncated: false })
   })
 })
 

@@ -324,6 +324,71 @@ export interface GitHubPullRequestCreateResult {
 }
 
 /**
+ * One axis of a structured review. A CLOSED union owned by `dsh-github`:
+ * consumers `switch` on it ending in `default: assertNever(...)`, so adding an
+ * axis is a deliberate seam change rather than a config string.
+ */
+export type GitHubReviewDimension =
+  | 'correctness'
+  | 'tests'
+  | 'error-handling'
+  | 'types'
+  | 'comments'
+  | 'simplification'
+
+/** How bad one finding is. Fixed vocabulary so findings stay comparable across reviews. */
+export type GitHubReviewSeverityLevel = 'blocker' | 'major' | 'minor' | 'nit'
+
+/** One severity level with the meaning the reviewer is asked to apply. */
+export interface GitHubReviewSeverity {
+  readonly level: GitHubReviewSeverityLevel
+  readonly meaning: string
+}
+
+/**
+ * One dimension's slice of a review brief. `paths` REFERENCES files of
+ * {@link GitHubReviewBrief.diff} rather than copying their patches: the diff is
+ * carried exactly once, so N dimensions never multiply the token cost of the
+ * same hunk (ADR-0013).
+ */
+export interface GitHubReviewDimensionBrief {
+  readonly dimension: GitHubReviewDimension
+  /** Why this dimension applies to THIS pull request — the routing rule that fired. */
+  readonly reason: string
+  /** Paths within `diff.files` this dimension is about; empty means the whole diff. */
+  readonly paths: readonly string[]
+  /** What to check, phrased as questions the reviewer answers against the code. */
+  readonly checklist: readonly string[]
+}
+
+/**
+ * Everything a structured review needs, assembled deterministically: the PR,
+ * its diff (once), the dimensions that apply, and the contract the findings
+ * must satisfy. The seam does NOT judge — it routes and packages evidence, and
+ * the model produces findings (ADR-0013).
+ */
+export interface GitHubReviewBrief {
+  readonly pullRequest: GitHubPullRequest
+  readonly diff: GitHubDiff
+  readonly dimensions: readonly GitHubReviewDimensionBrief[]
+  readonly severityScale: readonly GitHubReviewSeverity[]
+  /** The shape every finding must take, so reviews stay comparable. */
+  readonly outputContract: readonly string[]
+  /** True when the diff was reduced — the review is then knowingly partial. */
+  readonly truncated: boolean
+}
+
+/**
+ * Budgets and scope for a review brief. Extends the diff budgets because the
+ * brief carries a diff; consumers hold their own numbers here rather than
+ * reusing a plain PR read's (ADR-0013: a brief is a different cost profile).
+ */
+export interface GitHubReviewBriefRequest extends GitHubDiffRequest {
+  /** Restrict to these dimensions; omitted = whatever routing selects. */
+  readonly dimensions?: readonly GitHubReviewDimension[]
+}
+
+/**
  * A GitHub backend. Registered with `ctx.github.registerProvider`. One
  * provider owns ALL operations — reads and writes share identity, credentials,
  * and rate-limit budget (ADR-0003). `id` is a stable string, unique within
