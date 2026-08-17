@@ -1,6 +1,6 @@
 # dsh GitHub 连接器 — 设计文档
 
-> 状态：v1（M1–M7）已实现；v2「审查闭环」（M8–M10）设计定稿、未开工（范围决策见 [ADR-0012](../adr/0012-pr-review-loop-enters-scope.md)）。本文档是与 dsh 仓库调研结论一起沉淀的完整方案，随实现演进；客户端外壳的对接方式见 [ADR-0007](../adr/0007-ui-binds-client-shell-via-port.md)，依赖 dsh 宿主环境的两项手工验收仍挂起（见[执行计划](../plans/execution-plan.md) M3/M6）。
+> 状态：v1（M1–M7）已实现；v2「审查闭环」（范围决策见 [ADR-0012](../adr/0012-pr-review-loop-enters-scope.md)）：M8（审查读侧）已实现，M9/M10 设计定稿、未开工。本文档是与 dsh 仓库调研结论一起沉淀的完整方案，随实现演进；客户端外壳的对接方式见 [ADR-0007](../adr/0007-ui-binds-client-shell-via-port.md)，依赖 dsh 宿主环境的两项手工验收仍挂起（见[执行计划](../plans/execution-plan.md) M3/M6）。
 > 实施拆解见[执行计划](../plans/execution-plan.md)；关键取舍的决策记录见 [ADR](../adr/README.md)。
 
 ## 1. 目标与产品体验
@@ -65,13 +65,14 @@ PR 已合并                      →  确认后收起
 
 范围决策见 [ADR-0012](../adr/0012-pr-review-loop-enters-scope.md)。三段各自的新形状：
 
-**读侧（M8）**
+**读侧（M8，已实现）**
 
 - `GitHubReview { id, author, state, body?, submittedAt }`，`state` 为闭合联合 `'commented' | 'approved' | 'changes-requested' | 'dismissed' | 'pending'`
 - `GitHubReviewComment { id, path, line?, side, diffHunk?, body, author, createdAt, inReplyToId? }` —— 与 `GitHubComment`（issue 级）**是两个类型**，不合并：前者锚在代码行上，后者锚在 PR 上，模型对二者的处理方式不同
 - `GitHubCheckAnnotation { path, startLine?, endLine?, level, message, title? }`
-- `GitHubCheckFailure { checkRun, annotations, log? }`，`log: { text, truncated }` —— 取用顺序与预算见 [ADR-0015](../adr/0015-ci-failures-via-annotations-first.md)
-- 操作：`readPullRequestReviews`、`readPullRequestReviewComments`、`readCheckFailures`
+- `GitHubCheckFailure { run, annotations, log? }`，`log: { text, truncated }` —— 取用顺序与预算见 [ADR-0015](../adr/0015-ci-failures-via-annotations-first.md)
+- 操作（落地名）：`getReviews`、`getReviewComments`、`getCheckFailures(item, request)`，与既有 `getIssue` / `getDiff` 命名一致
+- job 日志的定位从 check run 的 `details_url` 解析 job id（零额外请求），而非 ADR-0015 设想的 `/actions/runs/{id}/jobs`——理由见[执行计划 M8 实现注记](../plans/execution-plan.md)
 
 > `resolved` / 线程折叠状态只有 GraphQL 有，REST 拿不到；v2 不提供该字段（GraphQL 仍在 §10 排除项内）。
 

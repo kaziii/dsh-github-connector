@@ -46,6 +46,9 @@ export interface RestPageResult<T> {
 /** Hard cap on followed pages so a runaway listing cannot spin the provider (execution plan M2). */
 export const MAX_PAGES = 10
 
+/** Client identity sent on every request, including unauthenticated redirect follows. */
+const USER_AGENT = 'dsh-github-rest'
+
 /**
  * Compose an absolute endpoint URL from the configured base, a `/`-prefixed
  * path, and query parameters. Trailing slashes on the base are tolerated so a
@@ -88,28 +91,83 @@ export function parseLinkNext(header: string | null): string | undefined {
  */
 export async function restRequest(transport: RestTransport, url: string, options: RestRequestOptions = {}): Promise<RestResponse> {
   const method = options.method ?? 'GET'
-  let response: Response
-  try {
-    response = await transport.fetch(url, {
-      method,
-      headers: {
-        'accept': 'application/vnd.github+json',
-        'authorization': `Bearer ${transport.token}`,
-        'user-agent': 'dsh-github-rest',
-        'x-github-api-version': '2022-11-28',
-        ...options.body === undefined ? {} : { 'content-type': 'application/json' },
-      },
-      ...options.body === undefined ? {} : { body: JSON.stringify(options.body) },
+  const response = await sendRequest(transport, url, method, {
+    method,
+    headers: {
+      'accept': 'application/vnd.github+json',
+      'authorization': `Bearer ${transport.token}`,
+      'user-agent': USER_AGENT,
+      'x-github-api-version': '2022-11-28',
+      ...options.body === undefined ? {} : { 'content-type': 'application/json' },
+    },
+    ...options.body === undefined ? {} : { body: JSON.stringify(options.body) },
+    ...options.signal === undefined ? {} : { signal: options.signal },
+  }, options.signal)
+  if (!response.ok) throw await errorFromResponse(method, url, response)
+  return { json: await response.json(), next: parseLinkNext(response.headers.get('link')) }
+}
+
+/**
+ * Fetch a PLAIN-TEXT endpoint (Actions job logs), following the API's redirect
+ * to object storage by hand.
+ *
+ * The redirect is followed manually and WITHOUT the `Authorization` header
+ * (ADR-0015): the target is a different host, and the signed, short-lived URL
+ * the API hands back already carries its own grant — forwarding our token there
+ * would leak the user's credential to storage infrastructure.
+ * @param transport - base, token, and fetch implementation for this operation.
+ * @param url - the absolute endpoint URL.
+ * @param options - cancellation only; this path is always an unbodied GET.
+ * @returns the response body as text.
+ */
+export async function restTextRequest(
+  transport: RestTransport,
+  url: string,
+  options: Pick<RestRequestOptions, 'signal'> = {},
+): Promise<string> {
+  const response = await sendRequest(transport, url, 'GET', {
+    method: 'GET',
+    headers: {
+      'authorization': `Bearer ${transport.token}`,
+      'user-agent': USER_AGENT,
+      'x-github-api-version': '2022-11-28',
+    },
+    redirect: 'manual',
+    ...options.signal === undefined ? {} : { signal: options.signal },
+  }, options.signal)
+  if (response.status >= 300 && response.status < 400) {
+    const location = response.headers.get('location')
+    if (location === null) {
+      throw new GitHubError(`GitHub redirected GET ${url} without a location header`, 'GITHUB_PROVIDER_HTTP')
+    }
+    const followed = await sendRequest(transport, location, 'GET', {
+      method: 'GET',
+      headers: { 'user-agent': USER_AGENT },
       ...options.signal === undefined ? {} : { signal: options.signal },
-    })
+    }, options.signal)
+    if (!followed.ok) throw await errorFromResponse('GET', location, followed)
+    return followed.text()
+  }
+  if (!response.ok) throw await errorFromResponse('GET', url, response)
+  return response.text()
+}
+
+/** One fetch with transport-level failures mapped to the seam vocabulary. */
+async function sendRequest(
+  transport: RestTransport,
+  url: string,
+  method: string,
+  init: RequestInit,
+  signal: AbortSignal | undefined,
+): Promise<Response> {
+  try {
+    return await transport.fetch(url, init)
   } catch (cause) {
-    if (options.signal?.aborted) {
+    if (signal?.aborted) {
       throw new GitHubError(`GitHub request ${method} ${url} was aborted`, 'GITHUB_ABORTED', { cause })
     }
     throw new GitHubError(`GitHub request ${method} ${url} failed before a response arrived`, 'GITHUB_PROVIDER_NETWORK', { cause })
   }
-  if (!response.ok) throw await errorFromResponse(method, url, response)
-  return { json: await response.json(), next: parseLinkNext(response.headers.get('link')) }
 }
 
 /**
@@ -193,6 +251,12 @@ async function errorFromResponse(method: string, url: string, response: Response
   }
   if (status === 404) {
     return new GitHubError(`GitHub resource not found: ${method} ${url}${suffix}`, 'GITHUB_NOT_FOUND')
+  }
+  // 410 Gone is what expired Actions logs return once past their retention
+  // window (ADR-0015). It is an absence, not a transport failure, so it joins
+  // 404 rather than the generic HTTP bucket.
+  if (status === 410) {
+    return new GitHubError(`GitHub resource is gone (expired or purged): ${method} ${url}${suffix}`, 'GITHUB_NOT_FOUND')
   }
   if (status === 422) {
     return new GitHubError(`GitHub rejected the request (HTTP 422)${suffix}`, 'GITHUB_VALIDATION')

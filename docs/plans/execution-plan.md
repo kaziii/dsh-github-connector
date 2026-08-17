@@ -1,6 +1,6 @@
 # dsh GitHub 连接器 — 执行计划
 
-> 状态：v1（M1–M7）全部完成（见根 [CHANGELOG.md](../../CHANGELOG.md)）；v2「审查闭环」（M8–M10）已拆解、未开工（范围决策见 [ADR-0012](../adr/0012-pr-review-loop-enters-scope.md)）。dsh 宿主 CLI（`@deepseek-ai/dsh`）已验证可安装并激活本连接器（`dsh.bundle` patch，见 M3 验收注记）；仅剩两项手工验收挂起：M3 的模型驱动 CLI 走查（只差真实 API key）与 M6 的端到端 UI 脚本（dsh 源码核实后绑定路径已定：连接入口为"插件配置"卡片、端口映射见 [ADR-0008](../adr/0008-settings-card-entry-and-real-slot-binding.md) 与 design §7，待 client 适配层落地后执行；脚本已写入 [PR #5](https://github.com/kaziii/dsh-github-connector/pull/5) 描述）。依据 [design.md](../design/design.md) 拆解为可直接开工的里程碑与任务清单，设计取舍的理由见 [ADR](../adr/README.md)。
+> 状态：v1（M1–M7）全部完成（见根 [CHANGELOG.md](../../CHANGELOG.md)）；v2「审查闭环」（范围决策见 [ADR-0012](../adr/0012-pr-review-loop-enters-scope.md)）：**M8 已完成**（审查读侧），M9/M10 已拆解、未开工。dsh 宿主 CLI（`@deepseek-ai/dsh`）已验证可安装并激活本连接器（`dsh.bundle` patch，见 M3 验收注记）；仅剩两项手工验收挂起：M3 的模型驱动 CLI 走查（只差真实 API key）与 M6 的端到端 UI 脚本（dsh 源码核实后绑定路径已定：连接入口为"插件配置"卡片、端口映射见 [ADR-0008](../adr/0008-settings-card-entry-and-real-slot-binding.md) 与 design §7，待 client 适配层落地后执行；脚本已写入 [PR #5](https://github.com/kaziii/dsh-github-connector/pull/5) 描述）。依据 [design.md](../design/design.md) 拆解为可直接开工的里程碑与任务清单，设计取舍的理由见 [ADR](../adr/README.md)。
 > 原则：每个里程碑结束时**产物独立可用、可测、可合并**；严格按依赖顺序推进，不并行开新面。
 
 ## 0. 总览
@@ -207,13 +207,17 @@ v2（M8–M10，范围决策见 [ADR-0012](../adr/0012-pr-review-loop-enters-sco
 
 ### 验收（DoD）
 
-- [ ] per-file 100% 覆盖率；keyless snapshot（新端点全部有录制 fixture）
-- [ ] annotations 命中 / 无 annotation 回落日志 / 日志 410 三条路径各有测试
-- [ ] 日志尾部截断边界：恰好等于预算、单行超预算、行首对齐后为空
-- [ ] `truncated` 诚实性测试（annotation 截断与日志截断都置位）
-- [ ] `github_pr_read` 新 part 的 present 输出 snapshot 定型
-- [ ] `*.e2e.ts`：真实 PR 上取一次 review comments 与一次失败 CI（无 token 自动 skip）
-- [ ] `pnpm gate:catalog` 通过（工具 schema 变更已再生）
+- [x] per-file 100% 覆盖率；keyless snapshot（新端点全部有录制 fixture）——全仓 337 测试、语句/分支/函数/行四项 100%
+- [x] annotations 命中 / 无 annotation 回落日志 / 日志 410 三条路径各有测试
+- [x] 日志尾部截断边界：恰好等于预算、单行超预算、行首对齐后为空
+- [x] `truncated` 诚实性测试（annotation 分页未穷尽与日志截断都置位；provider 侧已截断的日志向上传播为结果级 `truncated`）
+- [x] `github_pr_read` 新 part 的 present 输出 snapshot 定型
+- [x] `*.e2e.ts`：真实 PR 上取一次 review comments 与一次失败 CI（无 token 自动 skip）——已写入，**尚未在有 token 的环境实跑**
+- [x] `pnpm gate:catalog` 通过（工具 schema 变更已再生）
+
+### 实现注记（与 ADR-0015 的偏差）
+
+ADR-0015「后果」段设想 check-run → workflow job 的关联走 `GET /actions/runs/{id}/jobs`。实现时发现该端点需要 **run id**，而 run id 只能从 check run 的 `details_url` 里取——既然要解析这个 URL，job id 也在同一个 URL 里（`…/actions/runs/{run}/job/{job}`），多打一次请求没有收益。因此实际实现直接从 `details_url` 解析 job id，零额外请求；解析不出（非 Actions 检查、`details_url` 缺失或形状变化）时该 run 就没有日志证据，annotations 不受影响。ADR 不可变，差异记录于此。
 
 ## M9 — `github_pr_review` 结构化审查工具
 

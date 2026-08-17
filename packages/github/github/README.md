@@ -22,6 +22,8 @@ Reads and writes are deliberately ONE provider interface (ADR-0003): they share 
 | `search(request, signal?)` | Resolve the provider and run one search. Enforces `request.maxResults` on the result (truncates `items[]`, sets `truncated`). |
 | `getIssue` / `getPullRequest` / `getComments` / `getChecks` | Normalized on-demand reads. PR metadata never embeds diff or checks — they are separate calls. |
 | `getDiff(item, request?, signal?)` | Read a PR diff, enforcing the consumer-owned `maxFiles` / `maxPatchChars` budgets at the seam (ADR-0005). `truncated` is honest: true whenever ANY reduction happened, provider-side or seam-side. |
+| `getReviews` / `getReviewComments` | Submitted review verdicts, and the line-anchored comments they carry. `GitHubReviewComment` is deliberately NOT `GitHubComment`: it has a path and a line, and you act on it by editing that code. |
+| `getCheckFailures(item, request?, signal?)` | Why the failing checks failed: annotations when the CI tool reported them, otherwise a log **tail** under the consumer-owned `maxLogLines` / `maxLogChars` budgets (ADR-0015). Same honesty rule as `getDiff` — a provider-truncated log alone marks the whole result truncated. |
 | `createIssue` / `createComment` / `createPullRequest` | Writes. PR creation is idempotent (ADR-0004): an existing open PR for the same head/base comes back with `created: false`. |
 
 Providers register **capabilities**, not tools. `dsh-tool-github` is the only owner of model-facing names, descriptions, prompt guidance, JSON schemas, and presentation.

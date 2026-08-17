@@ -8,7 +8,7 @@
 |---|---|
 | `github_search` | 搜索 issues / pull-requests / repositories / code（闭合 kind 联合）。精简结果：`owner/repo#N [state] title` + URL。 |
 | `github_issue_read` | 标题、状态、标签、正文，外加封顶的聚合评论。 |
-| `github_pr_read` | 拆分为按需 part：`metadata`（默认）/ `diff` / `comments` / `checks`——一次调用绝不为模型没要的数据付费。 |
+| `github_pr_read` | 拆分为按需 part：`metadata`（默认）/ `diff` / `comments` / `reviews` / `checks` / `ci-failures`——一次调用绝不为模型没要的数据付费。 |
 | `github_issue_create` | 写操作，审批门控。 |
 | `github_issue_comment` | 写操作，审批门控。 |
 | `github_pr_create` | 写操作，审批门控，幂等（同 head/base 已有开放 PR 是正常答案，不是错误）。 |
@@ -21,6 +21,7 @@
 | `searchMaxResults` | `8` | 每次搜索的命中上限（search API 限流预算稀缺：30 次/分钟）。 |
 | `maxComments` | `30` | 每次读取返回的评论上限。 |
 | `diffMaxFiles` / `diffMaxPatchChars` | `50` / `60000` | **工具层持有**的 diff 预算（ADR-0005）：此处持有、传给 seam、由 seam 执行。 |
+| `logMaxLines` / `logMaxChars` | `80` / `8000` | **工具层持有**的 CI 日志预算，机制同上。只作用于日志**尾部**（ADR-0015）。 |
 | `timeoutMs` | `30000` | 挂到每个工具上的协作式超时（由 `dsh-timeout-policy` 执行）。 |
 
 ## 审批流（写操作）
@@ -38,3 +39,5 @@ seam 失败在工具边界翻译：限流变为携带 `retryAfterMs` 的等待�
 ## Model Experience
 
 模型看到六个 schema 严格而小巧的工具；在搜索命中与读取之间流转的可移植 `owner/repo` + `number` handle；为 token 开销调校的精简文本渲染；诚实的截断标记与恢复提示；以及被措辞为"答案"的写拒绝。系统提示词区块预先教会模型 part 拆分的 PR 读取与审批语义。
+
+有两个 part 的存在是为了让模型能闭合一条回路，而不只是旁观。`part=reviews` 同时返回裁决与行级评论——渲染为 `path:line · author (side): body`，可直接据以修改，这是 issue 级评论串做不到的。行号已失效（outdated）的评论改带 diff hunk，因为那是它仅剩的锚点。`part=ci-failures` 回答检查为什么失败：CI 工具报了结构化 annotation 就用它，否则取受预算约束的日志**尾部**——绝不取头部，因为失败信息总在末尾。两者都没有时，模型会被明确告知，而不是拿到一个空块。

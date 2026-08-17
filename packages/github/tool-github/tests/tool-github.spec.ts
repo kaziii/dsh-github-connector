@@ -14,6 +14,8 @@ import GitHubRuntime, {
 import * as toolGitHub from 'dsh-tool-github'
 import {
   formatChecks,
+  formatCiFailures,
+  formatReviews,
   formatComments,
   formatDiff,
   formatSearchOutput,
@@ -77,6 +79,30 @@ function makeProvider(overrides: Partial<GitHubProvider> = {}): GitHubProvider &
         { name: 'ci', status: 'completed' as const, conclusion: 'success' as const, url: 'https://x/runs/1' },
         { name: 'lint', status: 'in_progress' as const },
       ],
+    }),
+    getReviews: () => Promise.resolve([
+      { id: 11, state: 'approved' as const, author: 'alice', body: 'LGTM', submittedAt: '2026-08-04' },
+      { id: 12, state: 'changes-requested' as const, author: 'bob' },
+    ]),
+    getReviewComments: () => Promise.resolve([
+      { id: 21, path: 'src/a.ts', body: 'this leaks', side: 'right' as const, line: 42, author: 'bob', createdAt: '2026-08-04' },
+      { id: 22, path: 'src/b.ts', body: 'stale note', side: 'left' as const, diffHunk: '@@ -1 +1 @@' },
+      { id: 23, path: 'src/c.ts', body: 'third', side: 'right' as const, line: 7 },
+    ]),
+    getCheckFailures: () => Promise.resolve({
+      failures: [
+        {
+          run: { name: 'build', status: 'completed' as const, conclusion: 'failure' as const },
+          annotations: [{ path: 'src/a.ts', level: 'failure' as const, message: 'TS2345', title: 'tsc', startLine: 10, endLine: 12 }],
+        },
+        {
+          run: { name: 'test', status: 'completed' as const, conclusion: 'failure' as const },
+          annotations: [],
+          log: { text: 'exit 1', truncated: true },
+        },
+        { run: { name: 'scan', status: 'completed' as const, conclusion: 'timed_out' as const }, annotations: [] },
+      ],
+      truncated: false,
     }),
     createIssue: request => Promise.resolve({
       ref: { repo: request.repo, number: 9, url: 'https://github.com/octo/hello-world/issues/9' },
@@ -442,6 +468,112 @@ describe('github_pr_read', () => {
     expect(definition.presentCall!({ repo: 'o/r', number: 5, part: 'diff' })).toMatchObject({ title: 'Read GitHub PR o/r#5 (diff)' })
     expect(definition.presentCall!({ repo: 'o/r', number: 5 })).toMatchObject({ title: 'Read GitHub PR o/r#5 (metadata)' })
   })
+
+  it('reads submitted reviews together with the line-anchored comments (M8)', async () => {
+    const suite = await mountSuite()
+    const result = await suite.run('github_pr_read', { repo: 'octo/hello-world', number: 5, part: 'reviews' })
+    expect(ok(result)).toBe([
+      'Reviews (2):',
+      '- alice, 2026-08-04 — approved',
+      '  LGTM',
+      '- bob — changes-requested',
+      '',
+      'Line comments (3):',
+      '- src/a.ts:42 · bob (right): this leaks',
+      // An outdated comment lost its line, so the hunk is carried as the only anchor left.
+      '- src/b.ts (outdated) · unknown (left): stale note',
+      '```diff',
+      '@@ -1 +1 @@',
+      '```',
+      '- src/c.ts:7 · unknown (right): third',
+    ].join('\n'))
+  })
+
+  it('omits every absent optional field on reviews, comments, and annotations', async () => {
+    const suite = await mountSuite({}, {
+      provider: {
+        getReviews: () => Promise.resolve([{ id: 1, state: 'dismissed' as const }]),
+        getReviewComments: () => Promise.resolve([{ id: 2, path: 'src/a.ts', body: 'bare', side: 'right' as const }]),
+        getCheckFailures: () => Promise.resolve({
+          failures: [{
+            run: { name: 'bare', status: 'completed' as const },
+            annotations: [{ path: 'src/a.ts', level: 'notice' as const, message: 'plain' }],
+          }],
+          truncated: false,
+        }),
+      },
+    })
+    expect(ok(await suite.run('github_pr_read', { repo: 'octo/hello-world', number: 5, part: 'reviews' }))).toBe([
+      'Reviews (1):',
+      '- unknown — dismissed',
+      '',
+      'Line comments (1):',
+      '- src/a.ts (outdated) · unknown (right): bare',
+    ].join('\n'))
+    expect(ok(await suite.run('github_pr_read', { repo: 'octo/hello-world', number: 5, part: 'ci-failures' }))).toBe([
+      'CI failures (1):',
+      '- bare: failure',
+      '  ! src/a.ts [notice] plain',
+    ].join('\n'))
+  })
+
+  it('caps review comments the same way conversation comments are capped', async () => {
+    const suite = await mountSuite()
+    const result = await suite.run('github_pr_read', { repo: 'octo/hello-world', number: 5, part: 'reviews', max_comments: 1 })
+    expect(ok(result)).toContain('Line comments (showing 1 of 3; raise max_comments for more):')
+  })
+
+  it('reads CI failures, preferring annotations and falling back to the log tail (M8)', async () => {
+    const budgets: unknown[] = []
+    const suite = await mountSuite({ logMaxLines: 20, logMaxChars: 500 }, {
+      provider: {
+        getCheckFailures: (_item, request) => {
+          budgets.push(request)
+          return Promise.resolve({
+            failures: [{
+              run: { name: 'build', status: 'completed' as const, conclusion: 'failure' as const },
+              annotations: [],
+              log: { text: 'exit 1', truncated: true },
+            }],
+            truncated: true,
+          })
+        },
+      },
+    })
+    const result = await suite.run('github_pr_read', { repo: 'octo/hello-world', number: 5, part: 'ci-failures' })
+    expect(budgets[0]).toEqual({ maxLogLines: 20, maxLogChars: 500 })
+    expect(ok(result)).toBe([
+      'CI failures (1):',
+      '- build: failure',
+      '  Log (tail, truncated):',
+      '```',
+      'exit 1',
+      '```',
+      '(Evidence truncated by budget. Open the run on GitHub for the full log.)',
+    ].join('\n'))
+  })
+
+  it('renders all three evidence shapes in one failure read', async () => {
+    const suite = await mountSuite()
+    const result = await suite.run('github_pr_read', { repo: 'octo/hello-world', number: 5, part: 'ci-failures' })
+    expect(ok(result)).toBe([
+      'CI failures (3):',
+      '- build: failure',
+      '  ! src/a.ts:10 [failure] tsc: TS2345',
+      '',
+      '- test: failure',
+      '  Log (tail, truncated):',
+      '```',
+      'exit 1',
+      '```',
+      '',
+      '- scan: timed_out',
+      '  No annotations, and no log is available (expired, or not a GitHub Actions check).',
+      // The provider reported result.truncated=false, but one log carried
+      // truncated=true — the seam lifts that upward, so the note appears anyway.
+      '(Evidence truncated by budget. Open the run on GitHub for the full log.)',
+    ].join('\n'))
+  })
 })
 
 // —— pure formatters ——————————————————————————————————————————————————————————
@@ -451,6 +583,27 @@ describe('formatters', () => {
     expect(formatDiff({ files: [], truncated: false })).toBe('No changed files.')
     expect(formatChecks([])).toBe('No check runs reported.')
     expect(formatComments([], 0)).toBe('No comments.')
+    expect(formatCiFailures({ failures: [], truncated: false })).toBe('No failing check runs.')
+    expect(formatReviews({ items: [], comments: [], totalComments: 0 })).toBe('No submitted reviews.\n\nNo line comments.')
+  })
+
+  it('drops an all-whitespace review body rather than indenting nothing', () => {
+    expect(formatReviews({ items: [{ state: 'approved', author: 'alice', body: '  ' }], comments: [], totalComments: 0 }))
+      .toBe('Reviews (1):\n- alice — approved\n\nNo line comments.')
+  })
+
+  it('renders an annotation without a line or title', () => {
+    expect(formatCiFailures({
+      failures: [{ name: 'lint', annotations: [{ path: 'src/a.ts', level: 'warning', message: 'unused' }] }],
+      truncated: false,
+    })).toBe('CI failures (1):\n- lint: failure\n  ! src/a.ts [warning] unused')
+  })
+
+  it('omits the tail marker for a log that fit its budget whole', () => {
+    expect(formatCiFailures({
+      failures: [{ name: 'test', conclusion: 'failure', annotations: [], log: { text: 'exit 1', truncated: false } }],
+      truncated: false,
+    })).toBe('CI failures (1):\n- test: failure\n  Log:\n```\nexit 1\n```')
   })
 
   it('summarizes failing and passing check sets', () => {

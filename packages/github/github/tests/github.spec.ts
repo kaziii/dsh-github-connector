@@ -3,6 +3,8 @@ import { Context } from '@deepseek-ai/cordis'
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 import GitHubRuntime, {
   GitHubError,
+  type GitHubCheckFailuresResult,
+  type GitHubCheckRun,
   type GitHubComment,
   type GitHubDiff,
   type GitHubDiffFile,
@@ -11,6 +13,8 @@ import GitHubRuntime, {
   type GitHubProvider,
   type GitHubPullRequest,
   type GitHubRepoRef,
+  type GitHubReview,
+  type GitHubReviewComment,
   type GitHubSearchResult,
 } from 'dsh-github'
 import * as githubInvariant from 'dsh-github/invariant'
@@ -46,6 +50,23 @@ function searchResult(overrides: Partial<GitHubSearchResult> = {}): GitHubSearch
   return { items: [], truncated: false, ...overrides }
 }
 
+function review(body: string): GitHubReview {
+  return { id: 1, state: 'commented', body }
+}
+
+function reviewComment(body: string): GitHubReviewComment {
+  return { id: 1, path: 'src/a.ts', body, side: 'right', line: 42 }
+}
+
+function failedRun(name = 'build'): GitHubCheckRun {
+  return { name, status: 'completed', conclusion: 'failure' }
+}
+
+/** A failure result carrying one log, for budget tests. */
+function failuresWithLog(text: string, truncated = false): GitHubCheckFailuresResult {
+  return { failures: [{ run: failedRun(), annotations: [], log: { text, truncated } }], truncated: false }
+}
+
 /** A scripted provider for contract tests; override individual operations per test. */
 function makeProvider(id: string, usable: boolean, overrides: Partial<GitHubProvider> = {}): GitHubProvider {
   return {
@@ -57,6 +78,9 @@ function makeProvider(id: string, usable: boolean, overrides: Partial<GitHubProv
     getComments: () => Promise.resolve([comment(1)]),
     getDiff: () => Promise.resolve({ files: [diffFile('a.ts', '+a')], truncated: false }),
     getChecks: () => Promise.resolve({ runs: [{ name: 'ci', status: 'completed' as const, conclusion: 'success' as const }] }),
+    getReviews: () => Promise.resolve([review(`review:${id}`)]),
+    getReviewComments: () => Promise.resolve([reviewComment(`review-comment:${id}`)]),
+    getCheckFailures: () => Promise.resolve({ failures: [], truncated: false }),
     createIssue: request => Promise.resolve(issue({ repo: request.repo, number: 7 }, `created:${id}`)),
     createComment: () => Promise.resolve(comment(9)),
     createPullRequest: request => Promise.resolve({
@@ -195,6 +219,9 @@ describe('GitHubRuntime REAL composition (fake provider walks every operation)',
     await expect(github.getComments(item())).resolves.toEqual([comment(1)])
     await expect(github.getDiff(item())).resolves.toEqual({ files: [diffFile('a.ts', '+a')], truncated: false })
     await expect(github.getChecks(item())).resolves.toEqual({ runs: [{ name: 'ci', status: 'completed', conclusion: 'success' }] })
+    await expect(github.getReviews(item())).resolves.toEqual([review('review:rest')])
+    await expect(github.getReviewComments(item())).resolves.toEqual([reviewComment('review-comment:rest')])
+    await expect(github.getCheckFailures(item())).resolves.toEqual({ failures: [], truncated: false })
 
     await expect(github.createIssue({ repo: repo(), title: 't' })).resolves.toMatchObject({ title: 'created:rest' })
     await expect(github.createComment({ item: item(), body: 'b' })).resolves.toEqual(comment(9))
@@ -257,6 +284,25 @@ describe('GitHubRuntime ref and budget validation', () => {
     await expect(github.getDiff(item(), budget)).rejects.toThrow(expect.objectContaining({ code: 'GITHUB_VALIDATION' }))
   })
 
+  it.each([
+    ['zero maxLogLines', { maxLogLines: 0 }],
+    ['fractional maxLogChars', { maxLogChars: 2.5 }],
+  ])('rejects a log budget with %s as GITHUB_VALIDATION', async (_label, budget) => {
+    const { github } = await mountGitHub()
+    github.registerProvider(makeProvider('rest', available))
+    await expect(github.getCheckFailures(item(), budget)).rejects.toThrow(expect.objectContaining({ code: 'GITHUB_VALIDATION' }))
+  })
+
+  it.each([
+    ['getReviews', (github: GitHubRuntime) => github.getReviews(item(0))],
+    ['getReviewComments', (github: GitHubRuntime) => github.getReviewComments(item(0))],
+    ['getCheckFailures', (github: GitHubRuntime) => github.getCheckFailures(item(0))],
+  ])('validates the item ref of %s', async (_label, call) => {
+    const { github } = await mountGitHub()
+    github.registerProvider(makeProvider('rest', available))
+    await expect(call(github)).rejects.toThrow(expect.objectContaining({ code: 'GITHUB_VALIDATION' }))
+  })
+
   it('rejects a non-positive-integer search maxResults as GITHUB_VALIDATION', async () => {
     const { github } = await mountGitHub()
     github.registerProvider(makeProvider('rest', available))
@@ -266,6 +312,57 @@ describe('GitHubRuntime ref and budget validation', () => {
   it('validates before resolving the provider, so bad input never reports provider absence', async () => {
     const { github } = await mountGitHub()
     await expect(github.getIssue(item(0))).rejects.toThrow(expect.objectContaining({ code: 'GITHUB_VALIDATION' }))
+  })
+})
+
+describe('GitHubRuntime check-failure log budgets (ADR-0015)', () => {
+  async function budgeted(result: GitHubCheckFailuresResult, request?: Parameters<GitHubRuntime['getCheckFailures']>[1]) {
+    const { github } = await mountGitHub()
+    github.registerProvider(makeProvider('rest', available, { getCheckFailures: () => Promise.resolve(result) }))
+    return github.getCheckFailures(item(), request)
+  }
+
+  it('keeps only the trailing lines under maxLogLines', async () => {
+    const out = await budgeted(failuresWithLog('l1\nl2\nl3\nl4'), { maxLogLines: 2 })
+    expect(out.failures[0]!.log).toEqual({ text: 'l3\nl4', truncated: true })
+    expect(out.truncated).toBe(true)
+  })
+
+  it('cuts to maxLogChars and realigns forward to a line start', async () => {
+    // 'aaa\nbbb\nccc' tail-7 is 'bbb\nccc'; realignment drops the partial 'bbb'.
+    const out = await budgeted(failuresWithLog('aaa\nbbb\nccc'), { maxLogChars: 7 })
+    expect(out.failures[0]!.log).toEqual({ text: 'ccc', truncated: true })
+  })
+
+  it('keeps a partial line when the whole char budget lands inside one line', async () => {
+    const out = await budgeted(failuresWithLog('abcdefghij'), { maxLogChars: 4 })
+    expect(out.failures[0]!.log).toEqual({ text: 'ghij', truncated: true })
+  })
+
+  it('keeps the unaligned tail when realignment would leave nothing', async () => {
+    const out = await budgeted(failuresWithLog('ab\n'), { maxLogChars: 1 })
+    expect(out.failures[0]!.log).toEqual({ text: '\n', truncated: true })
+  })
+
+  it('leaves a log that exactly fits both budgets untouched', async () => {
+    const out = await budgeted(failuresWithLog('abc'), { maxLogLines: 1, maxLogChars: 3 })
+    expect(out.failures[0]!.log).toEqual({ text: 'abc', truncated: false })
+    expect(out.truncated).toBe(false)
+  })
+
+  it('passes failures without logs through unchanged', async () => {
+    const source: GitHubCheckFailuresResult = {
+      failures: [{ run: failedRun(), annotations: [{ path: 'a.ts', level: 'failure', message: 'boom' }] }],
+      truncated: false,
+    }
+    const out = await budgeted(source, { maxLogChars: 1 })
+    expect(out).toBe(source)
+  })
+
+  it('propagates a provider-truncated log into the result even with no budget of its own', async () => {
+    const out = await budgeted(failuresWithLog('short', true))
+    expect(out.truncated).toBe(true)
+    expect(out.failures[0]!.log).toEqual({ text: 'short', truncated: true })
   })
 })
 

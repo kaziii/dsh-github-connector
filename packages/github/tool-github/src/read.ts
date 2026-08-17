@@ -1,9 +1,9 @@
 /**
  * The model-facing `github_issue_read` and `github_pr_read` tools. PR reads
- * split into on-demand parts (`metadata` / `diff` / `comments` / `checks`) so
- * one call never pays for data the model did not ask for; the diff budgets are
- * OWNED HERE (tool layer) and passed to the seam, which enforces them
- * (ADR-0005).
+ * split into on-demand parts (`metadata` / `diff` / `comments` / `reviews` /
+ * `checks` / `ci-failures`) so one call never pays for data the model did not
+ * ask for; the diff and log budgets are OWNED HERE (tool layer) and passed to
+ * the seam, which enforces them (ADR-0005).
  * @module dsh-tool-github/read
  */
 
@@ -14,7 +14,7 @@ import type { GitHubComment, GitHubDiff, GitHubIssue, GitHubItemRef, GitHubPullR
 import { assertPositiveArg, parseRepoInput, repoLabel, runGitHub, type ResolvedToolGitHubConfig } from './shared.ts'
 
 /** The PR read parts — a CLOSED union consumers switch over. */
-export type PullRequestReadPart = 'metadata' | 'diff' | 'comments' | 'checks'
+export type PullRequestReadPart = 'metadata' | 'diff' | 'comments' | 'reviews' | 'checks' | 'ci-failures'
 
 /** Lean JSON projection of one comment. */
 interface CommentValue {
@@ -94,6 +94,98 @@ export function formatChecks(runs: readonly { name: string, status: string, conc
       ? `${pending.length} still running`
       : 'all passing'
   return `Checks (${verdict}):\n${lines.join('\n')}`
+}
+
+/** Lean JSON projection of one submitted review. */
+interface ReviewValue {
+  readonly state: string
+  readonly author?: string
+  readonly body?: string
+  readonly submittedAt?: string
+}
+
+/** Lean JSON projection of one line-anchored review comment. */
+interface ReviewCommentValue {
+  readonly path: string
+  readonly body: string
+  readonly side: string
+  readonly line?: number
+  readonly diffHunk?: string
+  readonly author?: string
+  readonly createdAt?: string
+}
+
+/** Reviews section: verdicts first, then the line-anchored feedback to act on. */
+export function formatReviews(value: { items: readonly ReviewValue[], comments: readonly ReviewCommentValue[], totalComments: number }): string {
+  const parts: string[] = []
+  parts.push(value.items.length === 0
+    ? 'No submitted reviews.'
+    : `Reviews (${value.items.length}):\n${value.items.map(reviewLine).join('\n')}`)
+  if (value.totalComments === 0) {
+    parts.push('No line comments.')
+  } else {
+    const header = value.comments.length < value.totalComments
+      ? `Line comments (showing ${value.comments.length} of ${value.totalComments}; raise max_comments for more):`
+      : `Line comments (${value.totalComments}):`
+    parts.push(`${header}\n${value.comments.map(reviewCommentLine).join('\n')}`)
+  }
+  return parts.join('\n\n')
+}
+
+/** One review as a markdown list line; the body indents under it when present. */
+function reviewLine(review: ReviewValue): string {
+  const meta = [review.author ?? 'unknown', ...review.submittedAt === undefined ? [] : [review.submittedAt]]
+  const head = `- ${meta.join(', ')} — ${review.state}`
+  const body = review.body === undefined || review.body.trim() === '' ? '' : `\n  ${review.body.trim().split('\n').join('\n  ')}`
+  return `${head}${body}`
+}
+
+/**
+ * One line comment as `path:line` plus body. The diff hunk is included ONLY for
+ * outdated comments (no line number): there the hunk is the sole remaining
+ * anchor, whereas for a live comment it would duplicate a diff the model can
+ * read in full via part=diff.
+ */
+function reviewCommentLine(comment: ReviewCommentValue): string {
+  const at = comment.line === undefined ? `${comment.path} (outdated)` : `${comment.path}:${comment.line}`
+  const head = `- ${at} · ${comment.author ?? 'unknown'} (${comment.side}): ${comment.body}`
+  return comment.line === undefined && comment.diffHunk !== undefined
+    ? `${head}\n\`\`\`diff\n${comment.diffHunk}\n\`\`\``
+    : head
+}
+
+/** CI failure evidence: one block per failed run, annotations preferred over log tails. */
+export function formatCiFailures(value: {
+  failures: readonly {
+    name: string
+    conclusion?: string
+    annotations: readonly { path: string, level: string, message: string, title?: string, startLine?: number, endLine?: number }[]
+    log?: { text: string, truncated: boolean }
+  }[]
+  truncated: boolean
+}): string {
+  if (value.failures.length === 0) return 'No failing check runs.'
+  const blocks = value.failures.map(failure => {
+    const head = `- ${failure.name}: ${failure.conclusion ?? 'failure'}`
+    if (failure.annotations.length > 0) {
+      return `${head}\n${failure.annotations.map(annotationLine).join('\n')}`
+    }
+    if (failure.log !== undefined) {
+      const note = failure.log.truncated ? ' (tail, truncated)' : ''
+      return `${head}\n  Log${note}:\n\`\`\`\n${failure.log.text}\n\`\`\``
+    }
+    return `${head}\n  No annotations, and no log is available (expired, or not a GitHub Actions check).`
+  })
+  const parts = [`CI failures (${value.failures.length}):`, blocks.join('\n\n')]
+  if (value.truncated) parts.push('(Evidence truncated by budget. Open the run on GitHub for the full log.)')
+  return parts.join('\n')
+}
+
+/** One annotation as an indented `path:line — message` line. */
+function annotationLine(annotation: { path: string, level: string, message: string, title?: string, startLine?: number }): string {
+  const at = annotation.startLine === undefined ? annotation.path : `${annotation.path}:${annotation.startLine}`
+  const title = annotation.title === undefined ? '' : `${annotation.title}: `
+  return `  ! ${at} [${annotation.level}] ${title}${annotation.message}`
 }
 
 /** Project the seam issue into the output value. */
@@ -218,16 +310,16 @@ export function applyGitHubIssueReadTool(ctx: Context, config: ResolvedToolGitHu
 export function applyGitHubPrReadTool(ctx: Context, config: ResolvedToolGitHubConfig): void {
   ctx.tools.register(defineTool({
     name: 'github_pr_read',
-    description: 'Read one GitHub pull request. part=metadata (default) returns title/state/branches/body; part=diff returns the changed files with patches (budgeted); part=comments returns the conversation; part=checks returns CI check runs.',
+    description: 'Read one GitHub pull request. part=metadata (default) returns title/state/branches/body; part=diff returns the changed files with patches (budgeted); part=comments returns the conversation; part=reviews returns submitted review verdicts plus the line-anchored review comments to act on; part=checks returns CI check runs; part=ci-failures returns why the failing checks failed (annotations, or a budgeted log tail).',
     parameters: {
       repo: { type: 'string', required: true, description: 'Repository as owner/repo.' },
       number: { type: 'integer', required: true, description: 'Pull request number.' },
       part: {
         type: 'string',
-        enum: ['metadata', 'diff', 'comments', 'checks'],
+        enum: ['metadata', 'diff', 'comments', 'reviews', 'checks', 'ci-failures'],
         description: 'Which facet to read; defaults to metadata.',
       },
-      max_comments: { type: 'integer', description: 'Upper bound on returned comments (part=comments only).' },
+      max_comments: { type: 'integer', description: 'Upper bound on returned comments (part=comments and part=reviews only).' },
     },
     output: {
       schema: {
@@ -302,6 +394,87 @@ export function applyGitHubPrReadTool(ctx: Context, config: ResolvedToolGitHubCo
               },
             },
           },
+          reviews: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              items: {
+                type: 'array',
+                required: true,
+                items: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    state: { type: 'string', required: true },
+                    author: { type: 'string' },
+                    body: { type: 'string' },
+                    submittedAt: { type: 'string' },
+                  },
+                },
+              },
+              comments: {
+                type: 'array',
+                required: true,
+                items: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    path: { type: 'string', required: true },
+                    body: { type: 'string', required: true },
+                    side: { type: 'string', required: true },
+                    line: { type: 'integer' },
+                    diffHunk: { type: 'string' },
+                    author: { type: 'string' },
+                    createdAt: { type: 'string' },
+                  },
+                },
+              },
+              totalComments: { type: 'integer', required: true },
+            },
+          },
+          ciFailures: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              failures: {
+                type: 'array',
+                required: true,
+                items: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    name: { type: 'string', required: true },
+                    conclusion: { type: 'string' },
+                    annotations: {
+                      type: 'array',
+                      required: true,
+                      items: {
+                        type: 'object',
+                        additionalProperties: false,
+                        properties: {
+                          path: { type: 'string', required: true },
+                          level: { type: 'string', required: true },
+                          message: { type: 'string', required: true },
+                          title: { type: 'string' },
+                          startLine: { type: 'integer' },
+                          endLine: { type: 'integer' },
+                        },
+                      },
+                    },
+                    log: {
+                      type: 'object',
+                      additionalProperties: false,
+                      properties: {
+                        text: { type: 'string', required: true },
+                        truncated: { type: 'boolean', required: true },
+                      },
+                    },
+                  },
+                },
+              },
+              truncated: { type: 'boolean', required: true },
+            },
+          },
         },
       },
       render: (_args, value) => [{ type: 'text', text: renderPrRead(value) }],
@@ -341,6 +514,55 @@ export function applyGitHubPrReadTool(ctx: Context, config: ResolvedToolGitHubCo
           const { comments, total } = capComments(all, args.max_comments, config.maxComments)
           return { part, comments: { items: comments, total } }
         }
+        case 'reviews': {
+          const reviews = await runGitHub(() => ctx.github.getReviews(item, exec.signal))
+          const all = await runGitHub(() => ctx.github.getReviewComments(item, exec.signal))
+          const bound = Math.min(args.max_comments ?? config.maxComments, config.maxComments)
+          return {
+            part,
+            reviews: {
+              items: reviews.map(review => ({
+                state: review.state,
+                ...review.author === undefined ? {} : { author: review.author },
+                ...review.body === undefined ? {} : { body: review.body },
+                ...review.submittedAt === undefined ? {} : { submittedAt: review.submittedAt },
+              })),
+              comments: all.slice(0, bound).map(comment => ({
+                path: comment.path,
+                body: comment.body,
+                side: comment.side,
+                ...comment.line === undefined ? {} : { line: comment.line },
+                ...comment.diffHunk === undefined ? {} : { diffHunk: comment.diffHunk },
+                ...comment.author === undefined ? {} : { author: comment.author },
+                ...comment.createdAt === undefined ? {} : { createdAt: comment.createdAt },
+              })),
+              totalComments: all.length,
+            },
+          }
+        }
+        case 'ci-failures': {
+          const result = await runGitHub(() =>
+            ctx.github.getCheckFailures(item, { maxLogLines: config.logMaxLines, maxLogChars: config.logMaxChars }, exec.signal))
+          return {
+            part,
+            ciFailures: {
+              failures: result.failures.map(failure => ({
+                name: failure.run.name,
+                ...failure.run.conclusion === undefined ? {} : { conclusion: failure.run.conclusion },
+                annotations: failure.annotations.map(annotation => ({
+                  path: annotation.path,
+                  level: annotation.level,
+                  message: annotation.message,
+                  ...annotation.title === undefined ? {} : { title: annotation.title },
+                  ...annotation.startLine === undefined ? {} : { startLine: annotation.startLine },
+                  ...annotation.endLine === undefined ? {} : { endLine: annotation.endLine },
+                })),
+                ...failure.log === undefined ? {} : { log: { text: failure.log.text, truncated: failure.log.truncated } },
+              })),
+              truncated: result.truncated,
+            },
+          }
+        }
         case 'checks': {
           const checks = await runGitHub(() => ctx.github.getChecks(item, exec.signal))
           return {
@@ -376,10 +598,26 @@ export function renderPrRead(value: {
   diff?: { files: { path: string, previousPath?: string, status: string, additions: number, deletions: number, patch?: string }[], truncated: boolean }
   comments?: { items: { body: string, author?: string, createdAt?: string }[], total: number }
   checks?: { runs: { name: string, status: string, conclusion?: string, url?: string }[] }
+  reviews?: {
+    items: { state: string, author?: string, body?: string, submittedAt?: string }[]
+    comments: { path: string, body: string, side: string, line?: number, diffHunk?: string, author?: string, createdAt?: string }[]
+    totalComments: number
+  }
+  ciFailures?: {
+    failures: {
+      name: string
+      conclusion?: string
+      annotations: { path: string, level: string, message: string, title?: string, startLine?: number, endLine?: number }[]
+      log?: { text: string, truncated: boolean }
+    }[]
+    truncated: boolean
+  }
 }): string {
   if (value.pullRequest !== undefined) return formatPullRequestHeader(value.pullRequest)
   if (value.diff !== undefined) return formatDiff(value.diff)
   if (value.comments !== undefined) return formatComments(value.comments.items, value.comments.total)
   if (value.checks !== undefined) return formatChecks(value.checks.runs)
+  if (value.reviews !== undefined) return formatReviews(value.reviews)
+  if (value.ciFailures !== undefined) return formatCiFailures(value.ciFailures)
   return `No data for part "${value.part}".`
 }

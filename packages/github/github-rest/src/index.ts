@@ -20,7 +20,7 @@ import { RestGitHubProvider, type ResolvedRestConfig } from './provider.ts'
 
 export { PROVIDER_ID, RestGitHubProvider } from './provider.ts'
 export type { ResolvedRestConfig, RestGitHubProviderOptions } from './provider.ts'
-export { buildUrl, MAX_PAGES, parseLinkNext, restPaginate, restRequest } from './http.ts'
+export { buildUrl, MAX_PAGES, parseLinkNext, restPaginate, restRequest, restTextRequest } from './http.ts'
 export type { RestPageResult, RestRequestOptions, RestResponse, RestTransport } from './http.ts'
 
 /** Plugin config; doubles as the `github-rest` settings-section schema. */

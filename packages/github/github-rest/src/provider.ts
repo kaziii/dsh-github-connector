@@ -9,6 +9,13 @@
  */
 
 import type {
+  GitHubAnnotationLevel,
+  GitHubCheckAnnotation,
+  GitHubCheckFailure,
+  GitHubCheckFailureRequest,
+  GitHubCheckFailuresResult,
+  GitHubCheckLog,
+  GitHubCheckRun,
   GitHubChecksResult,
   GitHubComment,
   GitHubCommentCreateRequest,
@@ -24,13 +31,16 @@ import type {
   GitHubPullRequestCreateRequest,
   GitHubPullRequestCreateResult,
   GitHubRepoRef,
+  GitHubReview,
+  GitHubReviewComment,
+  GitHubReviewState,
   GitHubSearchItem,
   GitHubSearchKind,
   GitHubSearchRequest,
   GitHubSearchResult,
 } from 'dsh-github'
 import { GitHubError } from 'dsh-github'
-import { buildUrl, restPaginate, restRequest, type RestTransport } from './http.ts'
+import { buildUrl, restPaginate, restRequest, restTextRequest, type RestTransport } from './http.ts'
 
 /** The provider's stable registry id. */
 export const PROVIDER_ID = 'rest'
@@ -111,6 +121,40 @@ interface RawCheckRun {
   readonly html_url?: string | null
 }
 interface RawCheckRuns { readonly check_runs: readonly RawCheckRun[] }
+/** Check-run shape with the fields only the failure path needs. */
+interface RawFailureCheckRun extends RawCheckRun {
+  readonly id: number
+  readonly details_url?: string | null
+}
+interface RawFailureCheckRuns { readonly check_runs: readonly RawFailureCheckRun[] }
+interface RawReview {
+  readonly id: number
+  readonly state: string
+  readonly user?: RawUser | null
+  readonly body?: string | null
+  readonly submitted_at?: string | null
+  readonly html_url?: string
+}
+interface RawReviewComment {
+  readonly id: number
+  readonly path: string
+  readonly body: string
+  readonly side?: string | null
+  readonly line?: number | null
+  readonly diff_hunk?: string
+  readonly user?: RawUser | null
+  readonly created_at?: string
+  readonly html_url?: string
+  readonly in_reply_to_id?: number
+}
+interface RawAnnotation {
+  readonly path: string
+  readonly annotation_level?: string | null
+  readonly message: string
+  readonly title?: string | null
+  readonly start_line?: number | null
+  readonly end_line?: number | null
+}
 interface RawSearchIssue extends RawIssue {
   readonly repository_url?: string
   readonly pull_request?: { readonly merged_at?: string | null }
@@ -142,6 +186,21 @@ const SEARCH_QUALIFIER: Record<GitHubSearchKind, string> = {
   'repositories': '',
   'code': '',
 }
+
+/** Wire review states (SCREAMING_SNAKE) mapped onto the seam's kebab vocabulary. */
+const REVIEW_STATES: Readonly<Record<string, GitHubReviewState>> = {
+  APPROVED: 'approved',
+  CHANGES_REQUESTED: 'changes-requested',
+  COMMENTED: 'commented',
+  DISMISSED: 'dismissed',
+  PENDING: 'pending',
+}
+
+/** Annotation levels the seam knows; anything else degrades to the least alarming one. */
+const ANNOTATION_LEVELS: ReadonlySet<string> = new Set<GitHubAnnotationLevel>(['notice', 'warning', 'failure'])
+
+/** Conclusions that count as a failure worth gathering evidence for (ADR-0015). */
+const FAILED_CONCLUSIONS: ReadonlySet<string> = new Set(['failure', 'timed_out', 'cancelled'])
 
 /** Diff statuses the seam vocabulary knows; anything the API adds later degrades to `changed`. */
 const FILE_STATUSES: ReadonlySet<string> = new Set<GitHubDiffFileStatus>([
@@ -210,6 +269,68 @@ function mapComment(raw: RawComment): GitHubComment {
     ...optional('createdAt', raw.created_at),
     ...optional('url', raw.html_url),
   }
+}
+
+function mapReview(raw: RawReview): GitHubReview {
+  return {
+    id: raw.id,
+    state: REVIEW_STATES[raw.state] ?? 'commented',
+    ...optional('author', raw.user?.login),
+    ...optional('body', raw.body),
+    ...optional('submittedAt', raw.submitted_at),
+    ...optional('url', raw.html_url),
+  }
+}
+
+function mapReviewComment(raw: RawReviewComment): GitHubReviewComment {
+  return {
+    id: raw.id,
+    path: raw.path,
+    body: raw.body,
+    // The API omits `side` on older comments; RIGHT (the post-change side) is
+    // where all but explicitly-left-side comments live.
+    side: raw.side === 'LEFT' ? 'left' : 'right',
+    ...optional('line', raw.line),
+    ...optional('diffHunk', raw.diff_hunk),
+    ...optional('author', raw.user?.login),
+    ...optional('createdAt', raw.created_at),
+    ...optional('url', raw.html_url),
+    ...optional('inReplyToId', raw.in_reply_to_id),
+  }
+}
+
+function mapAnnotation(raw: RawAnnotation): GitHubCheckAnnotation {
+  const level = raw.annotation_level ?? ''
+  return {
+    path: raw.path,
+    // Unknown levels degrade DOWNWARD: inventing `failure` out of a level we do
+    // not understand would overstate severity to the model.
+    level: ANNOTATION_LEVELS.has(level) ? level as GitHubAnnotationLevel : 'notice',
+    message: raw.message,
+    ...optional('title', raw.title),
+    ...optional('startLine', raw.start_line),
+    ...optional('endLine', raw.end_line),
+  }
+}
+
+function mapCheckRun(raw: RawCheckRun): GitHubCheckRun {
+  return {
+    name: raw.name,
+    status: raw.status,
+    ...optional('conclusion', raw.conclusion),
+    ...optional('url', raw.html_url),
+  }
+}
+
+/**
+ * Extract the Actions job id out of a check run's `details_url`
+ * (`…/actions/runs/{run}/job/{job}`). This is the only link from a check run to
+ * its job that costs no extra request; when the URL does not carry one (a
+ * non-Actions check, or a shape change), the run simply has no log evidence.
+ */
+function jobIdFromDetailsUrl(detailsUrl: string | null | undefined): number | undefined {
+  const match = detailsUrl == null ? null : /\/job\/(\d+)/.exec(detailsUrl)
+  return match === null ? undefined : Number(match[1])
 }
 
 function mapDiffFile(raw: RawDiffFile): GitHubDiffFile {
@@ -329,13 +450,85 @@ export class RestGitHubProvider implements GitHubProvider {
     const sha = (json as RawPullRequest).head.sha
     const first = buildUrl(transport.baseURL, `${repoPath(item.repo)}/commits/${sha}/check-runs`, { per_page: PAGE_SIZE })
     const { items } = await restPaginate(transport, first, page => (page as RawCheckRuns).check_runs, { signal })
-    return {
-      runs: items.map(raw => ({
-        name: raw.name,
-        status: raw.status,
-        ...optional('conclusion', raw.conclusion),
-        ...optional('url', raw.html_url),
-      })),
+    return { runs: items.map(mapCheckRun) }
+  }
+
+  async getReviews(item: GitHubItemRef, signal?: AbortSignal): Promise<readonly GitHubReview[]> {
+    const transport = await this.transport()
+    const first = buildUrl(transport.baseURL, `${repoPath(item.repo)}/pulls/${item.number}/reviews`, { per_page: PAGE_SIZE })
+    const { items } = await restPaginate(transport, first, json => (json as readonly RawReview[]), { signal })
+    return items.map(mapReview)
+  }
+
+  async getReviewComments(item: GitHubItemRef, signal?: AbortSignal): Promise<readonly GitHubReviewComment[]> {
+    const transport = await this.transport()
+    const first = buildUrl(transport.baseURL, `${repoPath(item.repo)}/pulls/${item.number}/comments`, { per_page: PAGE_SIZE })
+    const { items } = await restPaginate(transport, first, json => (json as readonly RawReviewComment[]), { signal })
+    return items.map(mapReviewComment)
+  }
+
+  async getCheckFailures(
+    item: GitHubItemRef,
+    request: GitHubCheckFailureRequest,
+    signal?: AbortSignal,
+  ): Promise<GitHubCheckFailuresResult> {
+    const transport = await this.transport()
+    const { json } = await restRequest(transport, this.itemUrl(transport, item, 'pulls'), { signal })
+    const sha = (json as RawPullRequest).head.sha
+    const first = buildUrl(transport.baseURL, `${repoPath(item.repo)}/commits/${sha}/check-runs`, { per_page: PAGE_SIZE })
+    const { items, exhausted } = await restPaginate(transport, first, page => (page as RawFailureCheckRuns).check_runs, { signal })
+    let truncated = !exhausted
+    const failures: GitHubCheckFailure[] = []
+    for (const raw of items) {
+      if (raw.conclusion == null || !FAILED_CONCLUSIONS.has(raw.conclusion)) continue
+      const annotations = await this.annotationsOf(transport, item.repo, raw.id, signal)
+      if (!annotations.exhausted) truncated = true
+      // ADR-0015: annotations are already `path:line + message`; logs are only
+      // worth their weight when there is nothing structured to read.
+      const wantLog = annotations.items.length === 0 || request.includeLogs === true
+      const log = wantLog ? await this.jobLogOf(transport, item.repo, raw, signal) : undefined
+      failures.push({
+        run: mapCheckRun(raw),
+        annotations: annotations.items,
+        ...log === undefined ? {} : { log },
+      })
+    }
+    return { failures, truncated }
+  }
+
+  /** Annotations of one check run, with the pagination honesty the caller needs. */
+  private async annotationsOf(
+    transport: RestTransport,
+    repo: GitHubRepoRef,
+    checkRunId: number,
+    signal: AbortSignal | undefined,
+  ): Promise<{ items: GitHubCheckAnnotation[], exhausted: boolean }> {
+    const url = buildUrl(transport.baseURL, `${repoPath(repo)}/check-runs/${checkRunId}/annotations`, { per_page: PAGE_SIZE })
+    const { items, exhausted } = await restPaginate(transport, url, json => (json as readonly RawAnnotation[]), { signal })
+    return { items: items.map(mapAnnotation), exhausted }
+  }
+
+  /**
+   * Log of the Actions job behind one check run, or undefined when there is no
+   * job to point at or its log is gone. An EXPIRED log (410, mapped to
+   * `GITHUB_NOT_FOUND`) is missing evidence rather than a failed read: the
+   * annotations gathered alongside it stay usable, so the absence is reported
+   * by omission instead of aborting the whole failure read.
+   */
+  private async jobLogOf(
+    transport: RestTransport,
+    repo: GitHubRepoRef,
+    raw: RawFailureCheckRun,
+    signal: AbortSignal | undefined,
+  ): Promise<GitHubCheckLog | undefined> {
+    const jobId = jobIdFromDetailsUrl(raw.details_url)
+    if (jobId === undefined) return undefined
+    const url = buildUrl(transport.baseURL, `${repoPath(repo)}/actions/jobs/${jobId}/logs`)
+    try {
+      return { text: await restTextRequest(transport, url, { signal }), truncated: false }
+    } catch (error) {
+      if (error instanceof GitHubError && error.code === 'GITHUB_NOT_FOUND') return undefined
+      throw error
     }
   }
 

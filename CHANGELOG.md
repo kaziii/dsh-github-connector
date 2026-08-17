@@ -10,6 +10,13 @@
 
 ## Unreleased
 
+M8 — the read half of the v2 review loop (ADR-0012), so the model can act on review feedback and on CI failures instead of merely observing that they exist:
+
+- **Review reads** — `getReviews` / `getReviewComments` on the seam and provider, plus `github_pr_read part=reviews`. Line-anchored review comments come from `/pulls/{n}/comments`, which v1 never touched: it only read the issue-level thread, so everything reviewers wrote *on the code* was invisible. `GitHubReviewComment` stays a separate type from `GitHubComment` — it carries a path and a line, and you act on it by editing that code. An outdated comment (line gone) renders with its diff hunk, the only anchor it has left. Thread `resolved` state is absent by design: GraphQL-only, still out of scope.
+- **CI failure evidence (ADR-0015)** — `getCheckFailures` and `github_pr_read part=ci-failures` answer *why* a check failed. Structured check-run annotations come first; a job log is fetched only when a failed run reported none (or `includeLogs` asks for it), and only its **tail** survives, under tool-owned `logMaxLines` / `logMaxChars` budgets the seam enforces (the ADR-0005 mechanism). The character cut realigns forward to a line start, except when the whole budget lands inside one line — a truncated line still names the failure, an empty log names nothing.
+- **Log transport** — `restTextRequest` handles the non-JSON endpoint and follows the redirect to object storage **manually and without the `Authorization` header**: the signed URL carries its own grant, and forwarding the user's token to a storage host would leak it. HTTP 410 now maps to `GITHUB_NOT_FOUND` alongside 404 — an expired Actions log is an absence, not a transport fault, and it degrades to "no evidence for this run" rather than failing the whole read.
+- **Honest truncation, upward** — a log the provider already truncated marks the entire failure result truncated even when no budget applies at the seam, so `truncated` can never under-report.
+
 The dsh client adapter (ADR-0008/ADR-0009), landing the real web-deployment path for `dsh-ui-github`:
 
 - **Polling instead of forwarded events (ADR-0009)** — dsh forwards no custom host events to the browser, so the UI now drives itself: the connect card polls the new `@Remote deviceFlowStatus()` at the server-dictated pace (a superseded flow's updates are dropped host-side), and the status bar polls `refreshFlowState` with backoff, pauses while hidden, keeps open dropdowns and drafts across unchanged rounds, folds CI changes into the badge in place, and remembers a collapsed merged banner. The Typert event selection narrows to `credentials/updated`.

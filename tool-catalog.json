@@ -49,7 +49,7 @@
           },
           {
             "name": "github_pr_read",
-            "description": "Read one GitHub pull request. part=metadata (default) returns title/state/branches/body; part=diff returns the changed files with patches (budgeted); part=comments returns the conversation; part=checks returns CI check runs.",
+            "description": "Read one GitHub pull request. part=metadata (default) returns title/state/branches/body; part=diff returns the changed files with patches (budgeted); part=comments returns the conversation; part=reviews returns submitted review verdicts plus the line-anchored review comments to act on; part=checks returns CI check runs; part=ci-failures returns why the failing checks failed (annotations, or a budgeted log tail).",
             "parameters": [
               "max_comments",
               "number",
@@ -79,7 +79,7 @@
           },
           {
             "name": "github_pr_read",
-            "description": "Read one GitHub pull request. part=metadata (default) returns title/state/branches/body; part=diff returns the changed files with patches (budgeted); part=comments returns the conversation; part=checks returns CI check runs.",
+            "description": "Read one GitHub pull request. part=metadata (default) returns title/state/branches/body; part=diff returns the changed files with patches (budgeted); part=comments returns the conversation; part=reviews returns submitted review verdicts plus the line-anchored review comments to act on; part=checks returns CI check runs; part=ci-failures returns why the failing checks failed (annotations, or a budgeted log tail).",
             "parameters": [
               "max_comments",
               "number",

@@ -141,6 +141,117 @@ export interface GitHubChecksResult {
 }
 
 /**
+ * Verdict of one submitted review. `pending` is a review its author started but
+ * has not submitted — visible only to that author, and carried here because the
+ * API returns it for the authenticated user.
+ */
+export type GitHubReviewState = 'commented' | 'approved' | 'changes-requested' | 'dismissed' | 'pending'
+
+/**
+ * One submitted review on a pull request — the verdict-bearing wrapper around a
+ * batch of {@link GitHubReviewComment}s. Distinct from {@link GitHubComment}:
+ * that one is a conversation post with no verdict.
+ */
+export interface GitHubReview {
+  readonly id: number
+  readonly state: GitHubReviewState
+  readonly author?: string
+  readonly body?: string
+  readonly submittedAt?: string
+  readonly url?: string
+}
+
+/** Which side of the diff a review comment is anchored to. */
+export type GitHubReviewSide = 'left' | 'right'
+
+/**
+ * One review comment anchored to a line of the diff. Deliberately NOT merged
+ * with {@link GitHubComment}: this one carries a file path and line, and a
+ * consumer acts on it by editing that code — a materially different shape and
+ * use than an issue-level conversation post.
+ *
+ * Thread resolution state is absent on purpose: it exists only in GraphQL,
+ * which stays out of scope (design §10).
+ */
+export interface GitHubReviewComment {
+  readonly id: number
+  readonly path: string
+  readonly body: string
+  readonly side: GitHubReviewSide
+  /** Line in the file the comment anchors to; absent when the comment is outdated. */
+  readonly line?: number
+  /** The diff hunk the comment was left on, as returned by the provider. */
+  readonly diffHunk?: string
+  readonly author?: string
+  readonly createdAt?: string
+  readonly url?: string
+  /** Set when this comment replies to another in the same thread. */
+  readonly inReplyToId?: number
+}
+
+/** Severity a CI tool assigned to one annotation. */
+export type GitHubAnnotationLevel = 'notice' | 'warning' | 'failure'
+
+/**
+ * One structured finding a check run reported against a file. This is the
+ * preferred failure evidence (ADR-0015): a CI tool already reduced its output
+ * to `path:line + message`, so no log scraping is needed.
+ */
+export interface GitHubCheckAnnotation {
+  readonly path: string
+  readonly level: GitHubAnnotationLevel
+  readonly message: string
+  readonly title?: string
+  readonly startLine?: number
+  readonly endLine?: number
+}
+
+/**
+ * The tail of a failed job's log. Only ever a TAIL: failure evidence (stack
+ * traces, summaries, exit codes) sits at the end, while the head is install and
+ * build noise.
+ */
+export interface GitHubCheckLog {
+  readonly text: string
+  readonly truncated: boolean
+}
+
+/** One failed check run with whatever evidence was obtainable for it. */
+export interface GitHubCheckFailure {
+  readonly run: GitHubCheckRun
+  readonly annotations: readonly GitHubCheckAnnotation[]
+  /** Present only when annotations were absent or logs were explicitly requested (ADR-0015). */
+  readonly log?: GitHubCheckLog
+}
+
+/**
+ * All failing check runs of a pull request head. `truncated` is honest in the
+ * same sense as {@link GitHubDiff}: true whenever ANY reduction happened —
+ * a dropped annotation page or a cut log tail.
+ */
+export interface GitHubCheckFailuresResult {
+  readonly failures: readonly GitHubCheckFailure[]
+  readonly truncated: boolean
+}
+
+/**
+ * Budgets and mode for a failure read. Like {@link GitHubDiffRequest}, the
+ * consumer owns the numbers and the seam enforces them in one place (ADR-0005).
+ * Omitted budgets = unbounded.
+ */
+export interface GitHubCheckFailureRequest {
+  /** Keep at most this many trailing log lines. */
+  readonly maxLogLines?: number
+  /** Keep at most this many trailing log characters. */
+  readonly maxLogChars?: number
+  /**
+   * Fetch job logs even for runs that already reported annotations. Default
+   * (false) follows ADR-0015: annotations first, logs only on a miss.
+   */
+  readonly includeLogs?: boolean
+}
+
+/**
  * What one search targets. A CLOSED union owned by `dsh-github`: consumers
  * `switch` on it ending in `default: assertNever(...)` so a new kind breaks
  * compilation at every consumer until handled.
@@ -234,6 +345,16 @@ export interface GitHubProvider {
   getDiff(item: GitHubItemRef, request: GitHubDiffRequest, signal?: AbortSignal): Promise<GitHubDiff>
   /** Check runs for the pull request's head commit. */
   getChecks(item: GitHubItemRef, signal?: AbortSignal): Promise<GitHubChecksResult>
+  /** Submitted reviews (verdicts) on a pull request. */
+  getReviews(item: GitHubItemRef, signal?: AbortSignal): Promise<readonly GitHubReview[]>
+  /** Aggregated line-anchored review comments on a pull request. */
+  getReviewComments(item: GitHubItemRef, signal?: AbortSignal): Promise<readonly GitHubReviewComment[]>
+  /**
+   * Failure evidence for the pull request's failing check runs. The provider
+   * decides annotations-versus-logs per ADR-0015 and MAY return an over-budget
+   * log; the seam enforces the budget and keeps `truncated` honest.
+   */
+  getCheckFailures(item: GitHubItemRef, request: GitHubCheckFailureRequest, signal?: AbortSignal): Promise<GitHubCheckFailuresResult>
   createIssue(request: GitHubIssueCreateRequest, signal?: AbortSignal): Promise<GitHubIssue>
   createComment(request: GitHubCommentCreateRequest, signal?: AbortSignal): Promise<GitHubComment>
   createPullRequest(request: GitHubPullRequestCreateRequest, signal?: AbortSignal): Promise<GitHubPullRequestCreateResult>
