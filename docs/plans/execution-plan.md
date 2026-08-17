@@ -1,6 +1,6 @@
 # dsh GitHub 连接器 — 执行计划
 
-> 状态：v1（M1–M7）全部完成（见根 [CHANGELOG.md](../../CHANGELOG.md)）；v2「审查闭环」（范围决策见 [ADR-0012](../adr/0012-pr-review-loop-enters-scope.md)）：**M8–M10 全部完成**，v2 审查闭环打通（仅 M10 的真实仓库手工验收挂起）。dsh 宿主 CLI（`@deepseek-ai/dsh`）已验证可安装并激活本连接器（`dsh.bundle` patch，见 M3 验收注记）；仅剩两项手工验收挂起：M3 的模型驱动 CLI 走查（只差真实 API key）与 M6 的端到端 UI 脚本（dsh 源码核实后绑定路径已定：连接入口为"插件配置"卡片、端口映射见 [ADR-0008](../adr/0008-settings-card-entry-and-real-slot-binding.md) 与 design §7，待 client 适配层落地后执行；脚本已写入 [PR #5](https://github.com/kaziii/dsh-github-connector/pull/5) 描述）。依据 [design.md](../design/design.md) 拆解为可直接开工的里程碑与任务清单，设计取舍的理由见 [ADR](../adr/README.md)。
+> 状态：v1（M1–M7）全部完成（见根 [CHANGELOG.md](../../CHANGELOG.md)）；v2「审查闭环」（范围决策见 [ADR-0012](../adr/0012-pr-review-loop-enters-scope.md)）：**M8–M10 全部完成**，v2 审查闭环打通（仅 M10 的真实仓库手工验收挂起）。dsh 宿主 CLI（`@deepseek-ai/dsh`）已验证可安装并激活本连接器（`dsh.bundle` patch，见 M3 验收注记）；仅剩两项手工验收挂起：M3 的模型驱动 CLI 走查（只差真实 API key）与 M6 的端到端 UI 脚本（dsh 源码核实后绑定路径已定：连接入口为"插件配置"卡片、端口映射见 [ADR-0008](../adr/0008-settings-card-entry-and-real-slot-binding.md) 与 design §7，待 client 适配层落地后执行；脚本已写入 [PR #5](https://github.com/kaziii/dsh-github-connector/pull/5) 描述）。**v3「跨机器同步」（范围决策见 [ADR-0016](../adr/0016-config-sync-via-github-repo.md) 与 [ADR-0017](../adr/0017-session-sync-readonly-with-fork-continuation.md)）：已拆解、未开工 —— M11 配置同步、M12 session 同步。** 依据 [design.md](../design/design.md) 拆解为可直接开工的里程碑与任务清单，设计取舍的理由见 [ADR](../adr/README.md)。
 > 原则：每个里程碑结束时**产物独立可用、可测、可合并**；严格按依赖顺序推进，不并行开新面。
 
 ## 0. 总览
@@ -17,11 +17,15 @@
 | M8 | 审查读侧 | review / review comment 读取 + CI 失败细节 | **模型能看评审意见、能看 CI 为什么红** |
 | M9 | 结构化审查 | `github_pr_review` 编排工具 + 维度路由 | AI 审查从一句 prompt 变为有覆盖面的任务 |
 | M10 | 审查回写 + 生命周期 | review 提交、PR 更新/指派、merge 前置检查 | 审查结论回到 PR，闭环完成 |
+| M11 | 配置同步 | `dsh-github-sync`（私有仓库 + git 传输 + 白名单同步集） | **换机器不用重配 dsh** |
+| M12 | session 同步 | 只读下行（发现/浏览）+ fork 续聊 + `SessionSyncPort` | 另一台机器上的对话可查、可接着聊 |
 
 依赖链：M1 → M2 → M3 → M4；M5 依赖 M1/M2（不依赖 M3/M4）；M6 依赖 M5；M7 依赖全部。
 M5 可与 M3/M4 并行（如有人力），但默认串行推进。
 
 v2（M8–M10，范围决策见 [ADR-0012](../adr/0012-pr-review-loop-enters-scope.md)）：M8 → M9 → M10 严格串行 —— M9 的证据包依赖 M8 的读形状，M10 的审批门控依赖 M9 产出的 finding 形状。
+
+v3（M11–M12，范围决策见 [ADR-0016](../adr/0016-config-sync-via-github-repo.md) / [ADR-0017](../adr/0017-session-sync-readonly-with-fork-continuation.md)）：M11 → M12 串行 —— M12 复用 M11 的仓库 provisioning 与 git 传输层。v3 只依赖 M5（Device Flow 拿到的凭据），不依赖 v2 的任何产物。
 
 ---
 
@@ -287,6 +291,62 @@ ADR-0014 的第二层门控写的是"`APPROVE` / `REQUEST_CHANGES` 走强制勾�
 
 ---
 
+# v3 — 跨机器同步
+
+> 范围决策：[ADR-0016](../adr/0016-config-sync-via-github-repo.md)（配置）、[ADR-0017](../adr/0017-session-sync-readonly-with-fork-continuation.md)（session）。design §4.3 是接口单一事实源；本节只写做什么、按什么顺序、验收标准。
+> 前提：v3 不新增授权 —— Device Flow 默认的 `repo` scope 已覆盖私有仓库创建与推送。
+
+## M11 — 配置同步
+
+**位置**：`packages/github/github-sync`（host plane，新包）
+
+### 任务
+
+1. 包骨架：`./invariant` 子导出、tsconfig，对齐现有五包结构。
+2. 仓库 provisioning：解析用户账号下的同步仓库（默认 `dsh-sync`），不存在则创建（`POST /user/repos`，`private: true`）；已存在则校验其确为私有。
+3. git 传输层：**自持注入式 git runner**（不复用 `dsh-github-connect` 的私有 helper，跨包依赖 private 实现不合适；execFile 包装本身只有几行）。token 经 `git -c http.extraHeader=` 传入，**不写进 `.git/config`、不拼进 remote URL**。
+4. 同步集为**白名单常量**：`settings.yaml` + 各 profile 的 `cordis.yml` / `cordis.patch.yml` / `package.json` / `pnpm-workspace.yaml`。白名单不可由用户配置扩展。
+5. 无条件排除 `.credentials.yaml`、`node_modules`、`storages/`。
+6. 冲突处理：非快进即冲突，就地提示由用户裁决，**不自动 merge 配置文件**。
+7. `dsh-ui-github` 连接卡片内增同步开关，默认关；i18n 配对。
+
+### 验收（DoD）
+
+- [ ] per-file 100% 覆盖率；keyless（无 token 可跑全量测试）
+- [ ] 白名单回归防护：同步集外新增任意文件都不被同步（锁定"白名单而非黑名单"这一决策）
+- [ ] `.credentials.yaml` 在任何配置组合下都不进同步集（专项测试）
+- [ ] token 不出现在 `.git/config`、remote URL 与任何日志输出中（专项断言）
+- [ ] 非快进冲突路径测试：远端领先时不覆盖、提示可读
+- [ ] **实测**：连续 100 次小增量 push 后 `X-RateLimit-Remaining` 未变化 —— 验证"git 传输不计入 REST core 配额"（[ADR-0016](../adr/0016-config-sync-via-github-repo.md) 后果段列为待证事实，是整个载体选择的地基）
+- [ ] **手工验收**：新机器 clone → `pnpm install` → profile 可用，全程未接触凭据
+- [ ] 双语 README（含 `## Model Experience`）+ i18n 配对
+
+## M12 — session 同步
+
+**位置**：`packages/github/github-sync`（扩展）+ `dsh-ui-github`
+
+### 任务
+
+1. `SessionSyncPort`：把 git / GitHub 特有部分收口在端口之下，端口声明 `supportsBidirectionalResume: false`（能力声明式，照 dsh `supportsRawArtifacts` 风格）。上层不得出现 git 语义。
+2. 上行：以 workspace（`owner/repo`）为粒度显式 opt-in，**默认关**；日志推送到 `sessions/<owner>/<repo>/`，按 remote 而非本地绝对路径分桶。
+3. 下行发现：列出远端 session（`list()`）。
+4. 下行浏览：只读加载用 `inspect()`（非破坏性，不提交崩溃修复），**不用 `load()`**。
+5. fork 续聊：`sessions.create(新 id, { seed, meta: { cwd: 本机, parentSession: 源 id, seedLength } })`。**禁用内置 `sessions.fork()`** —— 它继承源 session 的 cwd。
+6. 原地接管的拒绝路径：给出可读说明（"这不是 bug，是 session 与工作区路径绑定"），而非裸抛 `id collision`。
+7. UI：远端 session 浏览入口；`session/end-seed` 渲染为"以上为继承自另一台机器的历史"分隔线。
+
+### 验收（DoD）
+
+- [ ] fork 续聊测试：本机 cwd 生效、`parentSession` 保留、seq 从种子之后连续、**父日志字节未变**
+- [ ] 原地接管拒绝路径有测试，且错误文案对用户可读
+- [ ] 上行默认关的 schema/配置 snapshot（锁定默认值不被无声翻转，照 M10 `reviewVerdicts` 的做法）
+- [ ] 只读浏览走 `inspect` 而非 `load` 的断言（防止浏览别人的 session 触发崩溃修复写入）
+- [ ] 架构断言：`SessionSyncPort` 之上不出现 git / GitHub 词汇
+- [ ] 补做 [ADR-0017](../adr/0017-session-sync-readonly-with-fork-continuation.md) 后果段遗留的两项验证：同 id 不同 cwd 的本机重建是否冲突、内置 `fork()` 继承源 cwd 的实测（当前为源码事实）
+- [ ] 双语 README + i18n 配对
+
+---
+
 ## 风险与预案
 
 | 风险 | 影响 | 预案 |
@@ -303,6 +363,11 @@ ADR-0014 的第二层门控写的是"`APPROVE` / `REQUEST_CHANGES` 走强制勾�
 | 审查证据包体积超出模型上下文 | M9 | 独立预算 + 分维度切片（不重复全量 diff）；`truncated` 诚实并提示缩小范围 |
 | `reviewVerdicts` 默认值被后续改动无声翻转 | M10 | 两种取值各有 schema snapshot；catalog 变体覆盖 verdicts-on |
 | 以用户身份 approve 造成不可逆社会后果 | M10 | 双层门控（ADR-0014）：能力开关默认关 + 强制勾选确认 |
+| 配置同步把 `.credentials.yaml` 带上云 | M11 | 白名单而非黑名单（ADR-0016）+ 无条件排除的专项测试 |
+| "git 传输不吃 REST 配额"是推断而非实测，若证伪则载体选择的地基动摇 | M11 | 落地首步就做 100 次 push 实测；若证伪，退回按 workspace 粒度限流并重新评估 gist/后端方案 |
+| session 上行泄露完整对话、文件内容与命令输出 | M12 | 默认关 + per-workspace 显式 opt-in；GitHub push protection 作为兜底防线 |
+| fork 续聊的体验落差（用户期待同一对话，得到新 session id） | M12 | `session/end-seed` 渲染为继承分隔线；对外引用以血缘而非 session id 为锚 |
+| dsh 上游演进 session 模型，使 `SessionSyncPort` 失配 | M12 | 端口收口 + 能力声明（ADR-0017 决策 5）；上游出通用同步 seam 时本实现降级为 provider，上层不重写 |
 
 ## 工程门槛核对清单（每包合并前）
 

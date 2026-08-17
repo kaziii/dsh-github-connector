@@ -33,3 +33,5 @@
 | [0013](0013-structured-review-as-evidence-orchestrator.md) | 结构化审查由 `github_pr_review` 工具编排证据，判断仍归模型 | Accepted |
 | [0014](0014-review-verdicts-gated-behind-explicit-opt-in.md) | review 裁决（approve / request changes）默认关闭，仅评论默认可用 | Accepted |
 | [0015](0015-ci-failures-via-annotations-first.md) | CI 失败细节以 check-run annotations 为主、日志尾部为辅 | Accepted |
+| [0016](0016-config-sync-via-github-repo.md) | dsh 配置通过 GitHub 私有仓库同步，走 git 协议而非 contents API | Accepted |
+| [0017](0017-session-sync-readonly-with-fork-continuation.md) | session 同步：只读下行完整交付，写入止于 fork 续聊 | Accepted |
