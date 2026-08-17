@@ -1,6 +1,6 @@
 # dsh GitHub 连接器 — 设计文档
 
-> 状态：已实现（v1，M1–M7）。本文档是与 dsh 仓库调研结论一起沉淀的完整方案，随实现演进；客户端外壳的对接方式见 [ADR-0007](../adr/0007-ui-binds-client-shell-via-port.md)，依赖 dsh 宿主环境的两项手工验收仍挂起（见[执行计划](../plans/execution-plan.md) M3/M6）。
+> 状态：v1（M1–M7）已实现；v2「审查闭环」（M8–M10）设计定稿、未开工（范围决策见 [ADR-0012](../adr/0012-pr-review-loop-enters-scope.md)）。本文档是与 dsh 仓库调研结论一起沉淀的完整方案，随实现演进；客户端外壳的对接方式见 [ADR-0007](../adr/0007-ui-binds-client-shell-via-port.md)，依赖 dsh 宿主环境的两项手工验收仍挂起（见[执行计划](../plans/execution-plan.md) M3/M6）。
 > 实施拆解见[执行计划](../plans/execution-plan.md)；关键取舍的决策记录见 [ADR](../adr/README.md)。
 
 ## 1. 目标与产品体验
@@ -41,13 +41,15 @@ PR 已合并                      →  确认后收起
 |---|---|---|
 | `dsh-github` | packages/github/github（host） | **Service Definition**：`ctx.github`、规范化词汇、provider 注册（effect + disposer）、执行期 provider 解析、`GitHubError` |
 | `dsh-github-rest` | packages/github/github-rest（host） | **Provider**：fetch 直调 REST v3（不引 octokit）、credential-ref 鉴权、`baseURL` 支持 GHES、`installSettingsSection` 接入用户设置 |
-| `dsh-tool-github` | packages/github/tool-github（agent preset） | **Consumer**：`ctx.tools.register(defineTool(...))` 注册模型工具，`write` 开关 |
+| `dsh-tool-github` | packages/github/tool-github（agent preset） | **Consumer**：`ctx.tools.register(defineTool(...))` 注册模型工具，`write` 开关（v2 增 `reviewVerdicts` 开关，默认关，ADR-0014） |
 | `dsh-github-connect` | host | Device Flow 授权 + git flow-state 检测 + `@Remote` 方法（`createPr` / `mergePr` / `connectStatus`）供前端按钮直调 |
 | `dsh-ui-github` | client（React） | "插件 → 插件配置"页 GitHub 连接卡片（注册 `settings.plugin.item` slot，ADR-0008）+ 输入框上方 PR 状态条（注册 `conversation.input.dock` slot） |
 
 组合分层：Service Definition + Provider 进 host 组合（bundle patch），tool 进 agent preset —— 与 dsh web 家族"服务在宿主、工具在 preset"一致。
 
-## 4. Service Definition 接口草案（已评审）
+## 4. Service Definition 接口
+
+### 4.1 v1 核心类型（已实现）
 
 核心类型（完整草案见评审记录，风格对齐 `dsh-web`）：
 
@@ -58,6 +60,35 @@ PR 已合并                      →  确认后收起
 - Provider：单 provider 拥有全部操作（读写拆开会让身份/鉴权产生分歧）；`available()` 只做本地廉价检查
 - 错误：`GitHubError extends HarnessError`，开放 string code：`GITHUB_AUTH`、`GITHUB_RATE_LIMITED`（带 `retryAfterMs`）、`GITHUB_NOT_FOUND`、`GITHUB_VALIDATION`、`GITHUB_PROVIDER_*`、`GITHUB_ABORTED`
 - diff 预算：`GitHubDiffRequest { maxFiles, maxPatchChars }` 由 consumer 层持有、seam 统一执行截断，`truncated` 永远诚实
+
+### 4.2 v2 审查闭环扩展（设计定稿，未实现）
+
+范围决策见 [ADR-0012](../adr/0012-pr-review-loop-enters-scope.md)。三段各自的新形状：
+
+**读侧（M8）**
+
+- `GitHubReview { id, author, state, body?, submittedAt }`，`state` 为闭合联合 `'commented' | 'approved' | 'changes-requested' | 'dismissed' | 'pending'`
+- `GitHubReviewComment { id, path, line?, side, diffHunk?, body, author, createdAt, inReplyToId? }` —— 与 `GitHubComment`（issue 级）**是两个类型**，不合并：前者锚在代码行上，后者锚在 PR 上，模型对二者的处理方式不同
+- `GitHubCheckAnnotation { path, startLine?, endLine?, level, message, title? }`
+- `GitHubCheckFailure { checkRun, annotations, log? }`，`log: { text, truncated }` —— 取用顺序与预算见 [ADR-0015](../adr/0015-ci-failures-via-annotations-first.md)
+- 操作：`readPullRequestReviews`、`readPullRequestReviewComments`、`readCheckFailures`
+
+> `resolved` / 线程折叠状态只有 GraphQL 有，REST 拿不到；v2 不提供该字段（GraphQL 仍在 §10 排除项内）。
+
+**编排侧（M9）**
+
+- `GitHubReviewDimension = 'correctness' | 'tests' | 'error-handling' | 'types' | 'comments' | 'simplification'`（闭合联合，消费端 `switch + assertNever`）
+- `GitHubReviewBrief { dimensions: readonly GitHubReviewDimensionBrief[], truncated }`，每个 `GitHubReviewDimensionBrief { dimension, checklist, evidence, severityScale }`
+- 维度路由（哪些维度适用于本 PR）是**确定性规则**，由改动文件路径与 diff 特征推导，放在宿主；判断归模型（[ADR-0013](../adr/0013-structured-review-as-evidence-orchestrator.md)）
+- 预算独立于 `github_pr_read`，不复用其默认值
+
+**写侧（M10）**
+
+- `GitHubReviewSubmitRequest { item, event, body?, comments? }`，`event: 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES'`；`comments` 为 `{ path, line, side, body }[]`
+- `APPROVE` / `REQUEST_CHANGES` 受 preset 开关 `reviewVerdicts`（默认 `false`）门控，开启后走强制勾选确认（[ADR-0014](../adr/0014-review-verdicts-gated-behind-explicit-opt-in.md)）
+- PR 生命周期：`updatePullRequest`（title / body / base / draft→ready / state）、`requestReviewers`、`setLabels`、`listPullRequests`
+- `readMergeability(item) → { mergeable?, state, blockedBy }`：`mergePr` 的前置检查，不可合并时前端就地提示，不发 `PUT /merge`
+- 错误映射补充：approve 自己创建的 PR 返回 422，映射为对模型可读的说明而非裸 `GITHUB_VALIDATION`；Actions 日志过期返回 410，映射为 `GITHUB_NOT_FOUND`
 
 ## 5. 认证：GitHub Device Flow
 
@@ -79,6 +110,8 @@ CLI/headless 路径保持可用：直接配 `GITHUB_TOKEN` 环境变量或 `.cre
 | 创建 PR | `sessions.prompt("创建 PR …")`，模型经 GitHub 工具归纳标题/描述并创建（ADR-0011；`createPr`/`prDraft` @Remote 保留供集成方） | 是（有意取舍） |
 | Merge | `ctx.remote.github.mergePr`，接现有审批面板做不可逆确认 | 否 |
 | AI 审查 | `sessions.prompt("审查 PR #N …")`，正常 agent 回合 | 是（这正是目的） |
+
+v2 后 [AI 审查] 的 prompt 改为引导模型调用 `github_pr_review`（ADR-0013），按钮通路本身不变 —— 仍是 `shell.prompt`，不新增直连宿主的路径。该 prompt **不引导模型提交 review**：产出停在会话里，是否回写 GitHub 由用户下一句话决定（ADR-0014）。状态条自审场景永远拿不到 `APPROVE` —— GitHub 禁止批准自己创建的 PR。
 
 ## 7. dsh 基建依赖清单（调研结论）
 
@@ -131,6 +164,14 @@ client 半侧形态：package.json `exports["./client"]` + `dsh.client.{inject, 
 6. `dsh-ui-github`：连接卡片 + PR 状态条
 7. 收尾：catalog 登记、文档 gate、examples 叶子
 
-## 10. 未纳入 v1
+v2（审查闭环，ADR-0012）：
 
-PR review（approve / request changes）、merge queue、分支/文件内容读取（与 fs/web seam 职责重叠，需单独讨论）、reactions、GraphQL、token 自动刷新。
+8. 审查读侧：review / review comment 读取 + CI 失败细节（ADR-0015）
+9. `github_pr_review` 编排工具 + 维度路由（ADR-0013）
+10. 审查回写 + PR 生命周期 + merge 前置检查（ADR-0014）
+
+## 10. 未纳入
+
+**v1 未纳入、v2 已纳入**：PR review（读评审意见、结构化审查、approve / request changes 回写）—— 由 [ADR-0012](../adr/0012-pr-review-loop-enters-scope.md) 移入，设计见 §4.2。
+
+**仍未纳入**：merge queue、分支/文件内容读取（与 fs/web seam 职责重叠，需单独讨论；PR 模板 `.github/pull_request_template.md` 属此项，由 agent 用 fs 工具自行读取，连接器不开 contents API）、reactions、GraphQL（连带 review 线程 `resolved` 状态、suggested changes）、token 自动刷新。

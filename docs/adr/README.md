@@ -29,3 +29,7 @@
 | [0009](0009-polling-instead-of-forwarded-events.md) | UI 状态更新用轮询与 credentials 事件，不依赖自定义宿主事件转发 | Accepted |
 | [0010](0010-session-cwd-anchors-flow-state.md) | flow-state 与 PR 操作以会话工作区为锚点，不再用进程 cwd | Accepted |
 | [0011](0011-create-pr-via-agent-prompt.md) | 状态条 [创建 PR] 直接派发 agent 会话创建，不再弹预填面板 | Accepted |
+| [0012](0012-pr-review-loop-enters-scope.md) | 把 PR 审查闭环纳入范围，取代 v1 的"不做 review"约定 | Accepted |
+| [0013](0013-structured-review-as-evidence-orchestrator.md) | 结构化审查由 `github_pr_review` 工具编排证据，判断仍归模型 | Accepted |
+| [0014](0014-review-verdicts-gated-behind-explicit-opt-in.md) | review 裁决（approve / request changes）默认关闭，仅评论默认可用 | Accepted |
+| [0015](0015-ci-failures-via-annotations-first.md) | CI 失败细节以 check-run annotations 为主、日志尾部为辅 | Accepted |
