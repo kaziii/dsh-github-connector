@@ -12,6 +12,7 @@ import {
   RestGitHubProvider,
   restPaginate,
   restRequest,
+  restTextRequest,
   type RestGitHubProviderOptions,
   type RestTransport,
 } from 'dsh-github-rest'
@@ -542,6 +543,269 @@ describe('RestGitHubProvider reads', () => {
         { name: 'lint', status: 'in_progress' },
       ],
     })
+  })
+})
+
+// —— M8 review / CI-failure fixtures ——————————————————————————————————————
+
+const RAW_REVIEW_APPROVED = {
+  id: 11,
+  state: 'APPROVED',
+  user: { login: 'alice' },
+  body: 'LGTM',
+  submitted_at: '2026-08-04T00:00:00Z',
+  html_url: 'https://github.com/octo/hello-world/pull/5#pullrequestreview-11',
+}
+
+const RAW_REVIEW_UNKNOWN_STATE = { id: 12, state: 'SOMETHING_NEW', submitted_at: null }
+
+const RAW_REVIEW_COMMENT_FULL = {
+  id: 21,
+  path: 'src/a.ts',
+  body: 'this leaks',
+  side: 'RIGHT',
+  line: 42,
+  diff_hunk: '@@ -1 +1 @@',
+  user: { login: 'bob' },
+  created_at: '2026-08-04T01:00:00Z',
+  html_url: 'https://github.com/octo/hello-world/pull/5#discussion_r21',
+  in_reply_to_id: 20,
+}
+
+const RAW_REVIEW_COMMENT_LEFT = { id: 22, path: 'src/b.ts', body: 'was wrong before', side: 'LEFT', line: null }
+
+const RAW_REVIEW_COMMENT_NO_SIDE = { id: 23, path: 'src/c.ts', body: 'no side field' }
+
+const JOB_LOG_URL = 'https://pipelines.actions.githubusercontent.com/signed/job-101'
+
+const RAW_CHECK_FAILED = {
+  id: 101,
+  name: 'build',
+  status: 'completed',
+  conclusion: 'failure',
+  details_url: 'https://github.com/octo/hello-world/actions/runs/9/job/101',
+}
+
+const RAW_CHECK_FAILED_NO_JOB = {
+  id: 102,
+  name: 'external-scan',
+  status: 'completed',
+  conclusion: 'timed_out',
+  details_url: 'https://scanner.example.com/report/7',
+}
+
+const RAW_ANNOTATION = {
+  path: 'src/a.ts',
+  annotation_level: 'failure',
+  message: 'TS2345: not assignable',
+  title: 'tsc',
+  start_line: 10,
+  end_line: 12,
+}
+
+const RAW_ANNOTATION_UNKNOWN_LEVEL = { path: 'src/b.ts', annotation_level: 'catastrophe', message: 'unmapped level' }
+
+/** The wire shape when a tool reports a finding without any severity at all. */
+const RAW_ANNOTATION_NO_LEVEL = { path: 'src/c.ts', message: 'no level given' }
+
+describe('RestGitHubProvider review reads', () => {
+  it('maps review states onto the seam vocabulary, degrading unknown states to commented', async () => {
+    const { fetch: fetchImpl, calls } = recordingFetch(() => jsonResponse([RAW_REVIEW_APPROVED, RAW_REVIEW_UNKNOWN_STATE]))
+    const reviews = await makeProvider(fetchImpl).getReviews(item(5))
+    expect(calls[0]!.url).toBe(`${API}/repos/octo/hello-world/pulls/5/reviews?per_page=100`)
+    expect(reviews).toEqual([
+      {
+        id: 11,
+        state: 'approved',
+        author: 'alice',
+        body: 'LGTM',
+        submittedAt: '2026-08-04T00:00:00Z',
+        url: 'https://github.com/octo/hello-world/pull/5#pullrequestreview-11',
+      },
+      { id: 12, state: 'commented' },
+    ])
+  })
+
+  it('reads line-anchored review comments from the pulls endpoint, not the issues one', async () => {
+    const { fetch: fetchImpl, calls } = recordingFetch(() =>
+      jsonResponse([RAW_REVIEW_COMMENT_FULL, RAW_REVIEW_COMMENT_LEFT, RAW_REVIEW_COMMENT_NO_SIDE]))
+    const comments = await makeProvider(fetchImpl).getReviewComments(item(5))
+    expect(calls[0]!.url).toBe(`${API}/repos/octo/hello-world/pulls/5/comments?per_page=100`)
+    expect(comments).toEqual([
+      {
+        id: 21,
+        path: 'src/a.ts',
+        body: 'this leaks',
+        side: 'right',
+        line: 42,
+        diffHunk: '@@ -1 +1 @@',
+        author: 'bob',
+        createdAt: '2026-08-04T01:00:00Z',
+        url: 'https://github.com/octo/hello-world/pull/5#discussion_r21',
+        inReplyToId: 20,
+      },
+      { id: 22, path: 'src/b.ts', body: 'was wrong before', side: 'left' },
+      { id: 23, path: 'src/c.ts', body: 'no side field', side: 'right' },
+    ])
+  })
+})
+
+describe('RestGitHubProvider CI failure evidence (ADR-0015)', () => {
+  /** Route the shared prelude (PR → check-runs) and delegate the rest. */
+  function failureFetch(
+    runs: readonly unknown[],
+    rest: (url: URL, call: RecordedCall) => Response | Promise<Response>,
+  ): ReturnType<typeof recordingFetch> {
+    return recordingFetch((url, call) => {
+      if (url.pathname.endsWith('/pulls/5')) return jsonResponse(RAW_PR_OPEN)
+      if (url.pathname.endsWith('/check-runs')) return jsonResponse({ check_runs: runs })
+      return rest(url, call)
+    })
+  }
+
+  it('prefers annotations and never fetches the log when they exist', async () => {
+    const { fetch: fetchImpl, calls } = failureFetch([RAW_CHECK_FAILED, RAW_CHECK_DONE], () =>
+      jsonResponse([RAW_ANNOTATION, RAW_ANNOTATION_UNKNOWN_LEVEL, RAW_ANNOTATION_NO_LEVEL]))
+    const result = await makeProvider(fetchImpl).getCheckFailures(item(5), {})
+    expect(calls.some(call => call.url.includes('/logs'))).toBe(false)
+    expect(result).toEqual({
+      failures: [{
+        run: { name: 'build', status: 'completed', conclusion: 'failure' },
+        annotations: [
+          { path: 'src/a.ts', level: 'failure', message: 'TS2345: not assignable', title: 'tsc', startLine: 10, endLine: 12 },
+          // An unmapped level degrades downward rather than inventing severity.
+          { path: 'src/b.ts', level: 'notice', message: 'unmapped level' },
+          { path: 'src/c.ts', level: 'notice', message: 'no level given' },
+        ],
+      }],
+      truncated: false,
+    })
+  })
+
+  it('falls back to the job log when a run reported no annotations, following the redirect without the credential', async () => {
+    const { fetch: fetchImpl, calls } = failureFetch([RAW_CHECK_FAILED], url => {
+      if (url.pathname.endsWith('/annotations')) return jsonResponse([])
+      if (url.pathname.endsWith('/logs')) return new Response(null, { status: 302, headers: { location: JOB_LOG_URL } })
+      return textResponse('step failed\nexit 1\n', 200)
+    })
+    const result = await makeProvider(fetchImpl).getCheckFailures(item(5), {})
+    expect(result.failures[0]!.log).toEqual({ text: 'step failed\nexit 1\n', truncated: false })
+
+    const followed = calls.find(call => call.url === JOB_LOG_URL)!
+    // ADR-0015: the storage host is a different origin — our token must not travel there.
+    expect(followed.headers).not.toHaveProperty('authorization')
+    expect(calls.find(call => call.url.endsWith('/logs'))!.headers.authorization).toBe('Bearer token-1')
+  })
+
+  it('fetches the log alongside annotations when includeLogs is set', async () => {
+    const { fetch: fetchImpl, calls } = failureFetch([RAW_CHECK_FAILED], url => {
+      if (url.pathname.endsWith('/annotations')) return jsonResponse([RAW_ANNOTATION])
+      return textResponse('tail', 200)
+    })
+    const result = await makeProvider(fetchImpl).getCheckFailures(item(5), { includeLogs: true })
+    expect(calls.some(call => call.url.includes('/logs'))).toBe(true)
+    expect(result.failures[0]!.annotations).toHaveLength(1)
+    expect(result.failures[0]!.log).toEqual({ text: 'tail', truncated: false })
+  })
+
+  it('reports a failure with no evidence when the log has expired (410)', async () => {
+    const { fetch: fetchImpl } = failureFetch([RAW_CHECK_FAILED], url => {
+      if (url.pathname.endsWith('/annotations')) return jsonResponse([])
+      return jsonResponse({ message: 'Not Found' }, { status: 410 })
+    })
+    const result = await makeProvider(fetchImpl).getCheckFailures(item(5), {})
+    expect(result.failures).toEqual([{
+      run: { name: 'build', status: 'completed', conclusion: 'failure' },
+      annotations: [],
+    }])
+  })
+
+  it('skips the log for a check run whose details_url names no job, and for one with no details_url at all', async () => {
+    const nullUrl = { id: 103, name: 'legacy', status: 'completed', conclusion: 'failure', details_url: null }
+    const absentUrl = { id: 104, name: 'ancient', status: 'completed', conclusion: 'cancelled' }
+    // Annotations stay empty so the log path IS attempted and can only be
+    // skipped for want of a job id — an annotation would short-circuit it first.
+    const { fetch: fetchImpl, calls } = failureFetch([RAW_CHECK_FAILED_NO_JOB, nullUrl, absentUrl], () => jsonResponse([]))
+    const result = await makeProvider(fetchImpl).getCheckFailures(item(5), {})
+    expect(calls.some(call => call.url.includes('/logs'))).toBe(false)
+    expect(result.failures.map(failure => failure.run.name)).toEqual(['external-scan', 'legacy', 'ancient'])
+    expect(result.failures.every(failure => failure.log === undefined)).toBe(true)
+  })
+
+  it('ignores runs that did not fail, including ones still running', async () => {
+    const { fetch: fetchImpl } = failureFetch([RAW_CHECK_DONE, RAW_CHECK_RUNNING], () => jsonResponse([]))
+    const result = await makeProvider(fetchImpl).getCheckFailures(item(5), {})
+    expect(result).toEqual({ failures: [], truncated: false })
+  })
+
+  it('marks the result truncated when an annotation listing leaves a page behind', async () => {
+    const { fetch: fetchImpl } = failureFetch([RAW_CHECK_FAILED], url => {
+      const page = Number(url.searchParams.get('page') ?? '1')
+      return jsonResponse([RAW_ANNOTATION], {
+        headers: { link: `<${API}/repos/octo/hello-world/check-runs/101/annotations?page=${page + 1}>; rel="next"` },
+      })
+    })
+    const result = await makeProvider(fetchImpl).getCheckFailures(item(5), {})
+    expect(result.truncated).toBe(true)
+    expect(result.failures[0]!.annotations).toHaveLength(MAX_PAGES)
+  })
+
+  it('propagates a non-404 log failure instead of swallowing it as missing evidence', async () => {
+    const { fetch: fetchImpl } = failureFetch([RAW_CHECK_FAILED], url => {
+      if (url.pathname.endsWith('/annotations')) return jsonResponse([])
+      return jsonResponse({ message: 'boom' }, { status: 500 })
+    })
+    await expect(makeProvider(fetchImpl).getCheckFailures(item(5), {}))
+      .rejects.toThrow(expect.objectContaining({ code: 'GITHUB_PROVIDER_HTTP' }))
+  })
+})
+
+describe('restTextRequest', () => {
+  it('returns the body directly when the endpoint does not redirect', async () => {
+    const { fetch: fetchImpl } = recordingFetch(() => textResponse('inline log', 200))
+    await expect(restTextRequest(transportOver(fetchImpl), `${API}/x/logs`)).resolves.toBe('inline log')
+  })
+
+  it('maps a redirect without a location header to GITHUB_PROVIDER_HTTP', async () => {
+    const { fetch: fetchImpl } = recordingFetch(() => new Response(null, { status: 302 }))
+    await expect(restTextRequest(transportOver(fetchImpl), `${API}/x/logs`))
+      .rejects.toThrow(expect.objectContaining({ code: 'GITHUB_PROVIDER_HTTP' }))
+  })
+
+  it('maps a failure at the redirect target, not at the API', async () => {
+    const { fetch: fetchImpl } = recordingFetch(url =>
+      url.hostname === 'api.github.com'
+        ? new Response(null, { status: 302, headers: { location: JOB_LOG_URL } })
+        : textResponse('gone', 404))
+    await expect(restTextRequest(transportOver(fetchImpl), `${API}/x/logs`))
+      .rejects.toThrow(expect.objectContaining({ code: 'GITHUB_NOT_FOUND' }))
+  })
+
+  it('maps HTTP 410 to GITHUB_NOT_FOUND so expired logs read as absence', async () => {
+    const { fetch: fetchImpl } = recordingFetch(() => textResponse('', 410))
+    await expect(restTextRequest(transportOver(fetchImpl), `${API}/x/logs`))
+      .rejects.toThrow(expect.objectContaining({ code: 'GITHUB_NOT_FOUND' }))
+  })
+
+  it('carries the abort signal across the redirect hop', async () => {
+    const seen: (AbortSignal | undefined)[] = []
+    const fetchImpl: typeof globalThis.fetch = (input, init) => {
+      seen.push(init?.signal ?? undefined)
+      return Promise.resolve(String(input).startsWith(API)
+        ? new Response(null, { status: 302, headers: { location: JOB_LOG_URL } })
+        : textResponse('tail', 200))
+    }
+    const controller = new AbortController()
+    await expect(restTextRequest(transportOver(fetchImpl), `${API}/x/logs`, { signal: controller.signal })).resolves.toBe('tail')
+    expect(seen).toEqual([controller.signal, controller.signal])
+  })
+
+  it('forwards abort as GITHUB_ABORTED', async () => {
+    const { fetch: fetchImpl } = recordingFetch(() => textResponse('never', 200))
+    const controller = new AbortController()
+    controller.abort()
+    await expect(restTextRequest(transportOver(fetchImpl), `${API}/x/logs`, { signal: controller.signal }))
+      .rejects.toThrow(expect.objectContaining({ code: 'GITHUB_ABORTED' }))
   })
 })
 

@@ -22,6 +22,8 @@
 | `search(request, signal?)` | 解析 provider 并执行一次搜索。seam 对结果执行 `request.maxResults`（截断 `items[]` 并置 `truncated`）。 |
 | `getIssue` / `getPullRequest` / `getComments` / `getChecks` | 规范化的按需读取。PR 元数据不内嵌 diff 与 checks——它们是独立调用。 |
 | `getDiff(item, request?, signal?)` | 读 PR diff，并在 seam 层执行 consumer 持有的 `maxFiles` / `maxPatchChars` 预算（ADR-0005）。`truncated` 永远诚实：无论 provider 侧还是 seam 侧发生过任何削减即为 true。 |
+| `getReviews` / `getReviewComments` | 已提交的审查裁决，以及它们携带的行级评论。`GitHubReviewComment` 刻意不等同于 `GitHubComment`：它带文件路径与行号，处理方式是去改那段代码。 |
+| `getCheckFailures(item, request?, signal?)` | 失败的检查为什么失败：CI 工具报了 annotation 就用它，否则取受 consumer 持有的 `maxLogLines` / `maxLogChars` 预算约束的日志**尾部**（ADR-0015）。诚实规则同 `getDiff`——单是 provider 侧截断过的日志，就足以让整个结果标记为 truncated。 |
 | `createIssue` / `createComment` / `createPullRequest` | 写操作。PR 创建幂等（ADR-0004）：同 head/base 已有开放 PR 时返回既有 PR，`created: false`。 |
 
 provider 注册的是**能力**而非工具。模型可见的名称、描述、提示词、JSON schema 与呈现均由 `dsh-tool-github` 独家拥有。

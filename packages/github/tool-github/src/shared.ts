@@ -15,6 +15,8 @@ export interface ResolvedToolGitHubConfig {
   readonly maxComments: number
   readonly diffMaxFiles: number
   readonly diffMaxPatchChars: number
+  readonly logMaxLines: number
+  readonly logMaxChars: number
   readonly timeoutMs: number
 }
 

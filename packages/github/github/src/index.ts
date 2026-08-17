@@ -11,6 +11,10 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {
+  GitHubCheckFailure,
+  GitHubCheckFailureRequest,
+  GitHubCheckFailuresResult,
+  GitHubCheckLog,
   GitHubChecksResult,
   GitHubComment,
   GitHubCommentCreateRequest,
@@ -25,6 +29,8 @@ import type {
   GitHubPullRequestCreateRequest,
   GitHubPullRequestCreateResult,
   GitHubRepoRef,
+  GitHubReview,
+  GitHubReviewComment,
   GitHubSearchRequest,
   GitHubSearchResult,
 } from './types.ts'
@@ -34,7 +40,13 @@ export {
   GitHubError,
 } from './types.ts'
 export type {
+  GitHubAnnotationLevel,
+  GitHubCheckAnnotation,
   GitHubCheckConclusion,
+  GitHubCheckFailure,
+  GitHubCheckFailureRequest,
+  GitHubCheckFailuresResult,
+  GitHubCheckLog,
   GitHubCheckRun,
   GitHubChecksResult,
   GitHubCheckStatus,
@@ -55,6 +67,10 @@ export type {
   GitHubPullRequestCreateResult,
   GitHubPullRequestState,
   GitHubRepoRef,
+  GitHubReview,
+  GitHubReviewComment,
+  GitHubReviewSide,
+  GitHubReviewState,
   GitHubSearchItem,
   GitHubSearchKind,
   GitHubSearchRequest,
@@ -207,6 +223,52 @@ export class GitHubRuntime extends Service {
   }
 
   /**
+   * Read the submitted reviews (verdicts) of a pull request.
+   * @param item - the pull request handle.
+   * @param signal - optional cancellation signal forwarded to the provider.
+   * @returns the normalized reviews.
+   */
+  async getReviews(item: GitHubItemRef, signal?: AbortSignal): Promise<readonly GitHubReview[]> {
+    assertItemRef(item)
+    return this.resolveProvider().getReviews(item, signal)
+  }
+
+  /**
+   * Read the line-anchored review comments of a pull request. These are NOT the
+   * issue-level conversation comments {@link getComments} returns.
+   * @param item - the pull request handle.
+   * @param signal - optional cancellation signal forwarded to the provider.
+   * @returns the normalized review comments.
+   */
+  async getReviewComments(item: GitHubItemRef, signal?: AbortSignal): Promise<readonly GitHubReviewComment[]> {
+    assertItemRef(item)
+    return this.resolveProvider().getReviewComments(item, signal)
+  }
+
+  /**
+   * Read failure evidence for a pull request's failing check runs, enforcing
+   * the request's log budgets at the seam (ADR-0005 mechanism, ADR-0015
+   * policy). The provider may return logs full or pre-truncated; the final
+   * result never exceeds the budgets and `truncated` is true whenever ANY
+   * reduction happened.
+   * @param item - the pull request handle.
+   * @param request - consumer-owned `maxLogLines` / `maxLogChars` budgets and log mode.
+   * @param signal - optional cancellation signal forwarded to the provider.
+   * @returns the budgeted failure evidence.
+   */
+  async getCheckFailures(
+    item: GitHubItemRef,
+    request: GitHubCheckFailureRequest = {},
+    signal?: AbortSignal,
+  ): Promise<GitHubCheckFailuresResult> {
+    assertItemRef(item)
+    assertPositiveInteger('maxLogLines', request.maxLogLines)
+    assertPositiveInteger('maxLogChars', request.maxLogChars)
+    const result = await this.resolveProvider().getCheckFailures(item, request, signal)
+    return applyLogBudget(result, request)
+  }
+
+  /**
    * Create one issue through the selected provider.
    * @param request - target repo plus issue content.
    * @param signal - optional cancellation signal forwarded to the provider.
@@ -339,6 +401,55 @@ function applyDiffBudget(diff: GitHubDiff, request: GitHubDiffRequest): GitHubDi
   }
   if (files === diff.files && truncated === diff.truncated) return diff
   return { files, truncated }
+}
+
+/**
+ * Enforce log budgets at the seam and propagate honesty upward: a failure whose
+ * log the PROVIDER already truncated marks the whole result truncated even when
+ * no budget applies here, so `truncated` never under-reports.
+ */
+function applyLogBudget(result: GitHubCheckFailuresResult, request: GitHubCheckFailureRequest): GitHubCheckFailuresResult {
+  let truncated = result.truncated
+  let changed = false
+  const failures: GitHubCheckFailure[] = result.failures.map(failure => {
+    if (failure.log === undefined) return failure
+    const log = budgetLogTail(failure.log, request)
+    if (log.truncated) truncated = true
+    if (log === failure.log) return failure
+    changed = true
+    return { ...failure, log }
+  })
+  if (!changed && truncated === result.truncated) return result
+  return { failures, truncated }
+}
+
+/**
+ * Cut one log down to its TAIL under the budgets (ADR-0015). Lines go first,
+ * then characters; the character cut is realigned forward to a line start so
+ * the tail never opens mid-line. When the whole character budget lands inside a
+ * single line, realignment would leave nothing — the partial line is kept
+ * instead, because a truncated line still names the failure and an empty log
+ * names nothing.
+ */
+function budgetLogTail(log: GitHubCheckLog, request: GitHubCheckFailureRequest): GitHubCheckLog {
+  let text = log.text
+  let cut = false
+  if (request.maxLogLines !== undefined) {
+    const lines = text.split('\n')
+    if (lines.length > request.maxLogLines) {
+      text = lines.slice(-request.maxLogLines).join('\n')
+      cut = true
+    }
+  }
+  if (request.maxLogChars !== undefined && text.length > request.maxLogChars) {
+    const tail = text.slice(text.length - request.maxLogChars)
+    const newline = tail.indexOf('\n')
+    const aligned = newline === -1 ? '' : tail.slice(newline + 1)
+    text = aligned === '' ? tail : aligned
+    cut = true
+  }
+  if (!cut) return log
+  return { text, truncated: true }
 }
 
 export default GitHubRuntime
