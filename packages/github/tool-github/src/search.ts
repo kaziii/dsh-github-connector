@@ -6,10 +6,9 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { assertNever } from '@deepseek-ai/dsh-llm'
 import { defineTool, type ToolResult } from '@deepseek-ai/dsh-tools'
 import type { GitHubSearchItem, GitHubSearchKind, GitHubSearchResult } from 'dsh-github'
-import { assertPositiveArg, runGitHub, type ResolvedToolGitHubConfig } from './shared.ts'
+import { assertNever, assertPositiveArg, runGitHub, type ResolvedToolGitHubConfig } from './shared.ts'
 
 /** One lean model-facing search hit; `repo` collapses to `owner/repo`. */
 interface SearchValueItem {
