@@ -1,7 +1,7 @@
 {
   "name": "dsh-github-connector",
   "description": "GitHub connectivity for the DeepSeek Harness (dsh): capability seam, REST provider, model-facing tools, Device Flow connect, and PR workflow UI",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -19,9 +19,9 @@
     "gate:catalog": "pnpm build && node scripts/gen-tool-catalog.ts --check"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-system-prompt": "^0.0.1-rc.1",
-    "@deepseek-ai/dsh-tools": "^0.0.1-rc.1",
+    "@deepseek-ai/cordis": "~4.0.5",
+    "@deepseek-ai/dsh-system-prompt": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.5",
     "@types/node": "^22.15.0",
     "@vitest/coverage-v8": "^3.2.4",
     "dsh-github": "workspace:*",
