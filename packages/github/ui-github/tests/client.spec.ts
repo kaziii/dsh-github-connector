@@ -3,7 +3,8 @@ import type { ReactElement } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import type { InvocationDescriptor } from '@deepseek-ai/dsh-typert-protocol'
-import { ConnectGitHubSection, PrStatusBar } from 'dsh-ui-github'
+import { ConnectGitHubSection } from '../src/settings-section.ts'
+import { PrStatusBar } from '../src/status-bar.ts'
 import type { GitHubUiRemote } from '../src/types.ts'
 import { GITHUB_CONNECT_REMOTE } from '../src/client/contribution.ts'
 import { apply, detectLocale, inject, name } from '../src/client/index.ts'
@@ -67,7 +68,7 @@ function descriptor(method: string): InvocationDescriptor {
 
 function parseOf(codec: InvocationDescriptor['result']): (value: unknown) => unknown {
   if (codec.mode !== 'strict') throw new Error('expected a strict codec')
-  return value => codec.schema.parse(value)
+  return value => codec.create().parse(value)
 }
 
 // —— contribution —————————————————————————————————————————————————————————————
@@ -199,14 +200,14 @@ describe('GITHUB_CONNECT_REMOTE', () => {
 // —— browser shell ————————————————————————————————————————————————————————————
 
 describe('createBrowserShell', () => {
-  it('narrows the settings slot to the plugin-config card and keeps the dock name', () => {
+  it('mounts a GitHub plugins settings tab and keeps the dock name', () => {
     const suite = fakeClientCtx()
     const shell = createBrowserShell(suite.ctx)
     shell.registerSlot('settings.section', () => 'card')
     shell.registerSlot('conversation.input.dock', () => 'dock')
-    expect(suite.injected).toEqual(['settings.plugin.item', 'conversation.input.dock'])
+    expect(suite.injected).toEqual(['settings.plugins.tab', 'conversation.input.dock'])
     expect(suite.registrations.map(entry => entry.options)).toEqual([
-      { name: 'settings.plugin.item', id: 'github', order: 30 },
+      { name: 'settings.plugins.tab', id: 'github', order: 30, label: expect.any(Function) },
       { name: 'conversation.input.dock', id: 'github', order: 30 },
     ])
     expect(suite.registrations[0]!.component({})).toBe('card')
@@ -347,7 +348,7 @@ describe('client apply', () => {
     document.documentElement.lang = 'zh-CN'
     await apply(suite.ctx)
     expect(suite.raw.remote.$mount).toHaveBeenCalledWith(GITHUB_CONNECT_REMOTE)
-    expect(suite.injected).toEqual(['settings.plugin.item', 'conversation.input.dock'])
+    expect(suite.injected).toEqual(['settings.plugins.tab', 'conversation.input.dock'])
 
     const card = suite.registrations[0]!.component({}) as ReactElement<{ locale: string }>
     expect(card.type).toBe(ConnectGitHubSection)
@@ -379,8 +380,8 @@ describe('client apply', () => {
     expect(suite.raw.get).toHaveBeenCalledWith('remote.githubConnect')
     // $on still rides the injected gateway face.
     const listener = (): void => {}
-    remote.$on('credentials/updated', listener)
-    expect(suite.raw.remote.$on).toHaveBeenCalledWith('credentials/updated', listener)
+    remote.$on('credentials/record-updated', listener)
+    expect(suite.raw.remote.$on).toHaveBeenCalledWith('credentials/record-updated', listener)
   })
 
   it('falls back to the navigator language when the page declares none', async () => {
