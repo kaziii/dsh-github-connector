@@ -18,6 +18,8 @@
 
 前置条件：Node ≥ 22.19、pnpm、dsh CLI（`npm install -g @deepseek-ai/dsh`）。
 
+兼容性：本插件适配 **dsh 0.2.1-rc.5**（`engines.dsh: ">=0.2.1-rc.5 <0.3.0"`，见 [ADR-0018](docs/adr/0018-dsh-0-2-1-rc-5-compatibility.md)）。更早的 dsh 0.1.x 宿主不兼容。
+
 从 npm 一条命令安装：
 
 ```bash

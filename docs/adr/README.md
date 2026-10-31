@@ -35,3 +35,4 @@
 | [0015](0015-ci-failures-via-annotations-first.md) | CI 失败细节以 check-run annotations 为主、日志尾部为辅 | Accepted |
 | [0016](0016-config-sync-via-github-repo.md) | dsh 配置通过 GitHub 私有仓库同步，走 git 协议而非 contents API | Accepted |
 | [0017](0017-session-sync-readonly-with-fork-continuation.md) | session 同步：只读下行完整交付，写入止于 fork 续聊 | Accepted |
+| [0018](0018-dsh-0-2-1-rc-5-compatibility.md) | 适配 dsh 0.2.1-rc.5：以宿主 0.2.x 接口为准，移除 invariant 伴生插件 | Accepted |

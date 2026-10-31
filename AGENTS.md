@@ -4,7 +4,7 @@ Coding agent 在本仓库工作的入口上下文。人类贡献者同样适用�
 
 ## 项目一句话
 
-dsh-github-connector：为 [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) 提供 GitHub 连接能力——一键授权（Device Flow）、对话内 PR 工作流（创建 / AI 审查 / 合并）、模型侧 GitHub 工具。**当前状态：v1 已实现（M1–M7），五个包位于 `packages/github/`，可运行示例在 `examples/github-quickstart/`；仅剩依赖 dsh 宿主环境的两项手工验收挂起（见执行计划 M3/M6）。v2「审查闭环」（范围决策见 [ADR-0012](docs/adr/0012-pr-review-loop-enters-scope.md)）：M8–M10 全部已实现 —— 审查读侧（`github_pr_read` 的 `reviews` / `ci-failures` part）、结构化审查（`github_pr_review`）、审查回写与 PR 生命周期（`github_pr_review_submit` / `github_pr_update` / `github_pr_assign` / `github_pr_list` + merge 前置检查）；裁决类审查受 `reviewVerdicts` 开关门控，默认关（ADR-0014）。** 常用命令：`pnpm typecheck` / `pnpm test` / `pnpm test:coverage` / `pnpm build` / `pnpm gate:catalog`。
+dsh-github-connector：为 [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) 提供 GitHub 连接能力——一键授权（Device Flow）、对话内 PR 工作流（创建 / AI 审查 / 合并）、模型侧 GitHub 工具。**当前状态：已适配 dsh 0.2.1-rc.5（[ADR-0018](docs/adr/0018-dsh-0-2-1-rc-5-compatibility.md)）；v1 已实现（M1–M7），五个包位于 `packages/github/`，可运行示例在 `examples/github-quickstart/`；仅剩依赖 dsh 宿主环境的两项手工验收挂起（见执行计划 M3/M6）。v2「审查闭环」（范围决策见 [ADR-0012](docs/adr/0012-pr-review-loop-enters-scope.md)）：M8–M10 全部已实现 —— 审查读侧（`github_pr_read` 的 `reviews` / `ci-failures` part）、结构化审查（`github_pr_review`）、审查回写与 PR 生命周期（`github_pr_review_submit` / `github_pr_update` / `github_pr_assign` / `github_pr_list` + merge 前置检查）；裁决类审查受 `reviewVerdicts` 开关门控，默认关（ADR-0014）。** 常用命令：`pnpm typecheck` / `pnpm test` / `pnpm test:coverage` / `pnpm build` / `pnpm gate:catalog`。
 
 ## 文档地图（改动前必读）
 
@@ -25,7 +25,7 @@ dsh-github-connector：为 [DeepSeek Harness (dsh)](https://github.com/deepseek-
 
 ## 工程门槛（代码落地时生效，源自 design §8）
 
-- 每包：`./invariant` 子导出、per-file 100% 覆盖率、REAL-composition 测试、keyless snapshot（无 token 可跑全量测试）、`*.e2e.ts` 无 token 自动 skip
+- 每包：per-file 100% 覆盖率、REAL-composition 测试、keyless snapshot（无 token 可跑全量测试）、`*.e2e.ts` 无 token 自动 skip（`./invariant` 子导出随宿主 0.2.x 移除，见 ADR-0018）
 - 函数插件**禁止 default export**（dsh Loader 会丢 inject）
 - 工具包必须登记 `scripts/gen-tool-catalog.ts` boot manifest
 - 每包双语 README（含 `## Model Experience` 章节）+ i18n 配对

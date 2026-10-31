@@ -42,7 +42,7 @@ PR 已合并                      →  确认后收起
 | 包 | 位置 | 角色 |
 |---|---|---|
 | `dsh-github` | packages/github/github（host） | **Service Definition**：`ctx.github`、规范化词汇、provider 注册（effect + disposer）、执行期 provider 解析、`GitHubError` |
-| `dsh-github-rest` | packages/github/github-rest（host） | **Provider**：fetch 直调 REST v3（不引 octokit）、credential-ref 鉴权、`baseURL` 支持 GHES、`installSettingsSection` 接入用户设置 |
+| `dsh-github-rest` | packages/github/github-rest（host） | **Provider**：fetch 直调 REST v3（不引 octokit）、credential-ref 鉴权、`baseURL` 支持 GHES、`Config` 的 `.volatile()` 字段接入用户设置（宿主按 profile entry 投影表单，ADR-0018） |
 | `dsh-tool-github` | packages/github/tool-github（agent preset） | **Consumer**：`ctx.tools.register(defineTool(...))` 注册模型工具，`write` 开关（v2 增 `reviewVerdicts` 开关，默认关，ADR-0014） |
 | `dsh-github-connect` | host | Device Flow 授权 + git flow-state 检测 + `@Remote` 方法（`createPr` / `mergePr` / `connectStatus`）供前端按钮直调 |
 | `dsh-github-sync` | packages/github/github-sync（host） | **v3**：配置与 session 的跨机器同步（ADR-0016 / 0017）。自持注入式 git runner（不复用 `dsh-github-connect` 的私有 helper）；session 侧经 `SessionSyncPort` 收口，不让 git 语义外泄到上层 |
@@ -142,7 +142,7 @@ session 按 **repo remote（`owner/repo`）而非本地绝对路径**分桶：�
 - dsh webserver 端口可配置甚至 `port: 0`（OS 分配），而 OAuth App 的 redirect_uri 必须预注册固定值
 - Device Flow 只需 client_id（无 secret），适合本地分发的开源工具
 
-流程：`POST /login/device/code` → 前端 `window.open` 授权页（user_code 自动复制）→ 宿主按 `interval` 轮询 `POST /login/oauth/access_token` → 拿到 token 后 `ctx.credentials.set('GITHUB_TOKEN', ...)` → `credentials/updated` 事件推给前端刷新状态（该事件在 dsh 转发名单内；等待授权期间前端轮询 `connectStatus`，ADR-0009）。
+流程：`POST /login/device/code` → 前端 `window.open` 授权页（user_code 自动复制）→ 宿主按 `interval` 轮询 `POST /login/oauth/access_token` → 拿到 token 后 `ctx.credentials.set('GITHUB_TOKEN', ...)` → `credentials/reference-updated` 事件推给前端刷新状态（宿主 0.2.x 的凭据引用更新事件；等待授权期间前端轮询 `connectStatus`，ADR-0009 / 0018）。
 
 已知空白（二期）：凭据 seam 无"过期→刷新"钩子；GitHub 用户 token（`ghu_`）默认 8 小时过期。v1 用不过期授权模式绕过，refresh 机制后补。
 
@@ -163,7 +163,7 @@ M9 起 [AI 审查] 的 prompt 已改为引导模型调用 `github_pr_review`（A
 全部现成、无需改 core：
 
 - `ctx.webServer.register`：exact 路由（如需回调；Device Flow 下可不用）
-- `ctx.credentials.set/resolve` + `credentials/updated` 事件转发白名单
+- `ctx.credentials.set/resolve` + `credentials/reference-updated` 事件转发白名单
 - `ctx.tools.register(defineTool)` + `presentCall/presentResult`（纯函数，session 回放要求）
 - `tools/pre-execute` 审批流 + `ApprovalPanel`（写操作确认）
 - client slot 系统：`settings.plugin.item`（连接卡片，ADR-0008）、`conversation.input.dock`、`tool.call.toolview`
@@ -181,9 +181,9 @@ M9 起 [AI 审查] 的 prompt 已改为引导模型调用 `github_pr_review`（A
 | `confirmIrreversible(question)` | `RiskConfirmation` 组件（强制勾选确认，同包） |
 | `openExternal(url)` | 无命令式服务；组件渲染安全锚点 `<a target="_blank" rel="noopener noreferrer">`（仅 http(s)），端口成员在适配落地时收敛 |
 | `visibility` | 浏览器 `document.visibilitychange`（适配层自持） |
-| Typert Remote 客户端面 | 宿主 `TypertRemoteService` + `@Remote()`；client 半侧 `ctx.remote.$mount` 自行挂载（源码级验证通过：宿主无命名空间白名单，挂载无阶段限制，ADR-0009 上下文）。contribution 先手写 strict 描述符（codec 只需 `.parse`），dsh generator 构件后补。事件订阅面仅 `'credentials/updated'`（dsh 不转发自定义宿主事件，其余状态走轮询，ADR-0009） |
+| Typert Remote 客户端面 | 宿主 `TypertRemoteService` + `@Remote()`；client 半侧 `ctx.remote.$mount` 自行挂载（源码级验证通过：宿主无命名空间白名单，挂载无阶段限制，ADR-0009 上下文）。contribution 先手写 strict 描述符（codec 只需 `.parse`），dsh generator 构件后补。事件订阅面仅 `'credentials/reference-updated'`（dsh 不转发自定义宿主事件，其余状态走轮询，ADR-0009） |
 
-client 半侧形态：package.json `exports["./client"]` + `dsh.client.{inject, platform:"web"}` 双向一致，node 半侧空 `apply`；client 包间禁止 value import，跨插件走 cordis service。token 只走 credentials 域，不进 apiproxy `WEB_SETTINGS_NAMESPACES` 白名单。
+client 半侧形态：package.json `exports["./client"]` + `dsh.client.{inject, external, platform:"web"}` 双向一致（inject 指服务提供者包，external 指非基线模块请求，ADR-0018）；node 半侧空 `apply` 且不 import react；client 包间禁止 value import，跨插件走 cordis service。token 只走 credentials 域，不进 apiproxy `WEB_SETTINGS_NAMESPACES` 白名单。
 
 已知约束：
 
@@ -193,7 +193,7 @@ client 半侧形态：package.json `exports["./client"]` + `dsh.client.{inject, 
 
 ## 8. 工程约定（dsh 仓库门槛）
 
-- 每包：`./invariant` 子导出、per-file 100% 覆盖率、REAL-composition 测试、keyless snapshot、`*.e2e.ts`（无 token 自动 skip）
+- 每包：per-file 100% 覆盖率、REAL-composition 测试、keyless snapshot、`*.e2e.ts`（无 token 自动 skip）；`./invariant` 伴生插件随宿主 0.2.x 移除（ADR-0018）
 - 函数插件**禁止 default export**（Loader 会丢 inject，有 postmortem）
 - 工具包必须登记 `scripts/gen-tool-catalog.ts` boot manifest
 - 双语 README（`## Model Experience` 定型章节）+ i18n 配对
@@ -201,7 +201,7 @@ client 半侧形态：package.json `exports["./client"]` + `dsh.client.{inject, 
 
 ## 9. 实施顺序
 
-1. `dsh-github` seam + types + invariant
+1. `dsh-github` seam + types
 2. `dsh-github-rest`：认证 / 分页 / 限流（retry-after）/ 错误映射
 3. 只读工具三件套 + snapshot 测试（此时 CLI 用户已可用）
 4. 写工具 + 审批联动
