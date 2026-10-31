@@ -1,7 +1,7 @@
 /**
  * Post-`tsc -b` step of `pnpm build`: write each package's declared entry
  * files. tsc emits compiled JS under `lib/types/` (alongside declarations);
- * the package.json exports map points at `lib/index.js` / `lib/invariant.js`
+ * the package.json exports map points at `lib/index.js`
  * (the dsh publish layout), so this script bridges the two with re-export
  * shims. `export *` does not forward a default export, so packages whose
  * source declares one (class plugins) get an explicit default line.
@@ -32,6 +32,5 @@ for (const dir of PACKAGE_DIRS) {
   const indexSource = await readFile(join(dir, 'src/index.ts'), 'utf8')
   const hasDefault = /^export default /m.test(indexSource)
   await writeFile(join(dir, 'lib/index.js'), shim('./types/index.js', hasDefault))
-  await writeFile(join(dir, 'lib/invariant.js'), shim('./types/invariant.js', false))
-  console.log(`${dir}: lib/index.js${hasDefault ? ' (with default)' : ''}, lib/invariant.js`)
+  console.log(`${dir}: lib/index.js${hasDefault ? ' (with default)' : ''}`)
 }
