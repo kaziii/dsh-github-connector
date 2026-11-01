@@ -29,7 +29,7 @@ const OWNER = 'dsh-github-connect'
 
 /** Build one strict codec over a parse function. */
 function strict(typeSymbol: string, parse: (value: unknown) => unknown): TypertCodec {
-  return { mode: 'strict', typeSymbol, schema: { parse } }
+  return { mode: 'strict', typeSymbol, create: () => ({ parse }) }
 }
 
 /** Reject non-object boundary values; field-level shape stays with the host. */

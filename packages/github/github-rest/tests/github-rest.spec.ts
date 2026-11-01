@@ -1,8 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Credentials, { type CredentialInfo, type CredentialRef, type ResolvedCredential } from '@deepseek-ai/dsh-credentials'
-import Settings, { settingsNamespace } from '@deepseek-ai/dsh-settings'
-import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 import GitHubRuntime, { GitHubError, type GitHubItemRef, type GitHubRepoRef } from 'dsh-github'
 import * as githubRest from 'dsh-github-rest'
 import {
@@ -16,7 +14,6 @@ import {
   type RestGitHubProviderOptions,
   type RestTransport,
 } from 'dsh-github-rest'
-import * as restInvariant from 'dsh-github-rest/invariant'
 
 const API = 'https://api.github.com'
 
@@ -1151,18 +1148,6 @@ class FakeCredentials extends Credentials {
   }
 }
 
-class FakeSettings extends Settings {
-  override readonly writable = true
-
-  protected override load(): Promise<Record<string, unknown>> {
-    return Promise.resolve({})
-  }
-
-  protected override persist(): Promise<void> {
-    return Promise.resolve()
-  }
-}
-
 /** Let queued fibers (inject sub-scopes, watchers) settle. */
 function settle(): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, 0))
@@ -1246,35 +1231,40 @@ describe('dsh-github-rest plugin composition', () => {
       .rejects.toThrow(expect.objectContaining({ code: 'GITHUB_VALIDATION', message: expect.stringMatching(/not a ref!/) }))
   })
 
-  it('applies settings changes live and falls back to the entry config on detach', async () => {
+  it('applies live config changes and restores the entry config on reset', async () => {
     const { fetch: fetchImpl, calls } = recordingFetch(() => jsonResponse(RAW_ISSUE_MINIMAL))
     vi.stubGlobal('fetch', fetchImpl)
     process.env.GITHUB_TOKEN = 'env-token'
     const ctx = new Context()
-    const settingsFiber = await ctx.plugin(FakeSettings)
     await ctx.plugin(GitHubRuntime)
-    await ctx.plugin(githubRest)
+    const fiber = await ctx.plugin(githubRest)
     await settle()
 
-    await ctx.settings.update(settingsNamespace('github-rest'), { baseURL: 'https://ghe.example.com/api/v3' })
+    fiber.update({ baseURL: 'https://ghe.example.com/api/v3', credentialRef: 'GITHUB_TOKEN' })
+    await settle()
     await ctx.github.getIssue(item(8))
     expect(calls[0]!.url).toBe('https://ghe.example.com/api/v3/repos/octo/hello-world/issues/8')
 
-    await settingsFiber.dispose()
+    fiber.update({})
     await settle()
     await ctx.github.getIssue(item(8))
     expect(calls[1]!.url).toBe(`${API}/repos/octo/hello-world/issues/8`)
   })
-})
 
-describe('dsh-github-rest invariant companion', () => {
-  it('registers with the invariant service and returns a disposer', async () => {
+  it('uses a changed credential reference on the next operation', async () => {
+    const { fetch: fetchImpl, calls } = recordingFetch(() => jsonResponse(RAW_ISSUE_MINIMAL))
+    vi.stubGlobal('fetch', fetchImpl)
     const ctx = new Context()
-    await ctx.plugin(InvariantRegistry, {})
-    expect(restInvariant.name).toBe('github-rest-invariant')
-    expect(restInvariant.inject).toEqual(['invariants'])
-    const dispose = await restInvariant.apply(ctx)
-    expect(typeof dispose).toBe('function')
-    dispose()
+    await ctx.plugin(FakeCredentials)
+    await ctx.plugin(GitHubRuntime)
+    const fiber = await ctx.plugin(githubRest)
+    const credentials = ctx.get('credentials') as FakeCredentials
+    credentials.store.set('GITHUB_TOKEN', 'first-token')
+    credentials.store.set('OTHER_TOKEN', 'second-token')
+    await ctx.github.getIssue(item(8))
+    fiber.update({ credentialRef: 'OTHER_TOKEN' })
+    await settle()
+    await ctx.github.getIssue(item(8))
+    expect(calls.map(call => call.headers['authorization'])).toEqual(['Bearer first-token', 'Bearer second-token'])
   })
 })

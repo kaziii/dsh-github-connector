@@ -18,6 +18,8 @@ Docs (中文): [documentation index](docs/README.md) · [architecture](docs/desi
 
 Prerequisites: Node ≥ 22.19, pnpm, and the dsh CLI (`npm install -g @deepseek-ai/dsh`).
 
+Compatibility: this plugin targets **dsh 0.2.1-rc.5** (`engines.dsh: ">=0.2.1-rc.5 <0.3.0"`, see [ADR-0018](docs/adr/0018-dsh-0-2-1-rc-5-compatibility.md)). Earlier 0.1.x hosts are not supported.
+
 Install from npm — one command:
 
 ```bash

@@ -44,8 +44,9 @@ export function ConnectGitHubSection(props: ConnectSectionProps): ReactElement {
 
   useEffect(() => {
     void refresh()
-    const offCredentials = remote.$on('credentials/updated', () => void refresh())
-    return offCredentials
+    const offReference = remote.$on('credentials/reference-updated', () => void refresh())
+    const offRecord = remote.$on('credentials/record-updated', () => void refresh())
+    return () => { offReference(); offRecord() }
   }, [remote, refresh])
 
   const waiting = view.kind === 'waiting'

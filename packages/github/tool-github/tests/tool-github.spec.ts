@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { Context, Service } from '@deepseek-ai/cordis'
-import { CallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import { ToolRegistry, type ToolExecutionResult, type ToolResult } from '@deepseek-ai/dsh-tools'
-import InvariantRegistry from '@deepseek-ai/dsh-invariants'
+import { ToolRuntime, type ToolExecutionResult, type ToolResult } from '@deepseek-ai/dsh-tools'
 import GitHubRuntime, {
   GitHubError,
   type GitHubComment,
@@ -34,7 +33,6 @@ import {
   searchCallTitle,
   toModelError,
 } from 'dsh-tool-github'
-import * as toolInvariant from 'dsh-tool-github/invariant'
 
 const agent = { name: 'tester' } as unknown as Agent
 
@@ -183,13 +181,13 @@ interface Suite {
   ctx: Context
   provider: ReturnType<typeof makeProvider>
   approval?: FakeApproval
-  run(name: string, args: unknown, options?: { withAgent?: boolean }): Promise<ToolExecutionResult>
+  run(name: string, args: unknown, options?: { withAgent?: boolean, signal?: AbortSignal }): Promise<ToolExecutionResult>
 }
 
 async function mountSuite(config: toolGitHub.Config = {}, options: { approval?: boolean, provider?: Partial<GitHubProvider> } = {}): Promise<Suite> {
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
-  await ctx.plugin(ToolRegistry, {})
+  await ctx.plugin(ToolRuntime, {})
   await ctx.plugin(GitHubRuntime)
   let approval: FakeApproval | undefined
   if (options.approval === true) {
@@ -205,10 +203,10 @@ async function mountSuite(config: toolGitHub.Config = {}, options: { approval?: 
     provider,
     ...approval === undefined ? {} : { approval },
     run: (name, args, runOptions = {}) => ctx.tools.execute({
-      callId: CallId(`call-${calls++}`),
+      callId: ToolCallId(`call-${calls++}`),
       name,
       arguments: args,
-      signal: new AbortController().signal,
+      signal: runOptions.signal ?? new AbortController().signal,
       ...runOptions.withAgent === true ? { agent } : {},
     }),
   }
@@ -246,6 +244,29 @@ describe('dsh-tool-github plugin', () => {
     expect(names).toContain('github_pr_create')
   })
 
+  it('attaches the configured timeout to every registered GitHub tool', async () => {
+    const { ctx } = await mountSuite({ timeoutMs: 12345 })
+    const names = ctx.tools.schemas().map(schema => schema.name).filter(name => name.startsWith('github_'))
+    expect(names).toHaveLength(11)
+    for (const name of names) expect(ctx.tools.get(name)?.timeoutMs).toBe(12345)
+  })
+
+  it('forwards caller cancellation through the runtime to the provider', async () => {
+    let providerSignal: AbortSignal | undefined
+    const suite = await mountSuite({}, { provider: {
+      search: async (_request, signal) => {
+        providerSignal = signal
+        return { items: [], truncated: false }
+      },
+    } })
+    const controller = new AbortController()
+    const result = await suite.run('github_search', { kind: 'issues', query: 'test' }, { signal: controller.signal })
+    expect(result.isError).toBe(false)
+    expect(providerSignal).toBeDefined()
+    controller.abort()
+    expect(providerSignal!.aborted).toBe(true)
+  })
+
   it('keeps write tools out of the catalog when write is off (M4 DoD)', async () => {
     const { ctx } = await mountSuite({ write: false })
     const names = ctx.tools.schemas().map(schema => schema.name)
@@ -258,7 +279,7 @@ describe('dsh-tool-github plugin', () => {
   it('rejects a non-positive config bound at mount', async () => {
     const ctx = new Context()
     await ctx.plugin(SystemPrompt)
-    await ctx.plugin(ToolRegistry, {})
+    await ctx.plugin(ToolRuntime, {})
     await ctx.plugin(GitHubRuntime)
     await expect(ctx.plugin(toolGitHub, { searchMaxResults: 0 })).rejects.toThrow(/searchMaxResults/)
   })
@@ -1273,19 +1294,5 @@ describe('write tools and the approval gate', () => {
     const result = await suite.run('github_issue_create', { repo: 'nope', title: 'T' }, { withAgent: true })
     expect(result.isError).toBe(true)
     expect(text(result)).toMatch(/repo must be "owner\/repo"/)
-  })
-})
-
-// —— invariant companion ——————————————————————————————————————————————————————
-
-describe('dsh-tool-github invariant companion', () => {
-  it('registers with the invariant service and returns a disposer', async () => {
-    const ctx = new Context()
-    await ctx.plugin(InvariantRegistry, {})
-    expect(toolInvariant.name).toBe('tool-github-invariant')
-    expect(toolInvariant.inject).toEqual(['invariants'])
-    const dispose = await toolInvariant.apply(ctx)
-    expect(typeof dispose).toBe('function')
-    dispose()
   })
 })

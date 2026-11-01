@@ -20,8 +20,8 @@
  */
 
 import type { ReactNode } from 'react'
-import type { Events } from '@deepseek-ai/cordis'
 import type {
+  TypertClientEventListener,
   RemoteResult,
   TypertRemoteEvent,
   TypertRemoteNamespace,
@@ -69,7 +69,8 @@ declare module '@deepseek-ai/dsh-typert-protocol/types' {
   // here would type-check and then never fire. Everything beyond credential
   // changes arrives by frontend-paced polling instead.
   interface TypertRemoteEventSelection {
-    'credentials/updated': true
+    'credentials/reference-updated': true
+    'credentials/record-updated': true
   }
 }
 
@@ -86,7 +87,7 @@ export interface GitHubUiRemote {
    * @param listener - receives the Host's argument list.
    * @returns the subscription's disposer.
    */
-  $on<Event extends TypertRemoteEvent>(event: Event, listener: Events[Event]): () => void
+  $on<Event extends TypertRemoteEvent>(event: Event, listener: TypertClientEventListener<Event>): () => void
 }
 
 // —— client-shell port ————————————————————————————————————————————————————————

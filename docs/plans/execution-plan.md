@@ -2,6 +2,7 @@
 
 > 状态：v1（M1–M7）全部完成（见根 [CHANGELOG.md](../../CHANGELOG.md)）；v2「审查闭环」（范围决策见 [ADR-0012](../adr/0012-pr-review-loop-enters-scope.md)）：**M8–M10 全部完成**，v2 审查闭环打通（仅 M10 的真实仓库手工验收挂起）。dsh 宿主 CLI（`@deepseek-ai/dsh`）已验证可安装并激活本连接器（`dsh.bundle` patch，见 M3 验收注记）；仅剩两项手工验收挂起：M3 的模型驱动 CLI 走查（只差真实 API key）与 M6 的端到端 UI 脚本（dsh 源码核实后绑定路径已定：连接入口为"插件配置"卡片、端口映射见 [ADR-0008](../adr/0008-settings-card-entry-and-real-slot-binding.md) 与 design §7，待 client 适配层落地后执行；脚本已写入 [PR #5](https://github.com/kaziii/dsh-github-connector/pull/5) 描述）。**v3「跨机器同步」（范围决策见 [ADR-0016](../adr/0016-config-sync-via-github-repo.md) 与 [ADR-0017](../adr/0017-session-sync-readonly-with-fork-continuation.md)）：已拆解、未开工 —— M11 配置同步、M12 session 同步。** 依据 [design.md](../design/design.md) 拆解为可直接开工的里程碑与任务清单，设计取舍的理由见 [ADR](../adr/README.md)。
 > 原则：每个里程碑结束时**产物独立可用、可测、可合并**；严格按依赖顺序推进，不并行开新面。
+> 兼容性：本仓库已适配 dsh `0.2.1-rc.5`（[ADR-0018](../adr/0018-dsh-0-2-1-rc-5-compatibility.md)）。宿主移除了 invariants 服务与 `./invariant` 伴生插件、设置区改由 `Config` 的 `.volatile()` 字段投影、凭据事件改为 `credentials/reference-updated`；下文 M1/M2 里出现的 `./invariant` 与 `installSettingsSection` 表述属历史记录。
 
 ## 0. 总览
 

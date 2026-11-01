@@ -18,7 +18,7 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { Context } from '@deepseek-ai/cordis'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import { ToolRegistry } from '@deepseek-ai/dsh-tools'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
 import GitHubRuntime, { GitHubError, type GitHubProvider } from 'dsh-github'
 import * as toolGitHub from 'dsh-tool-github'
 
@@ -79,7 +79,7 @@ function stubProvider(): GitHubProvider {
 async function snapshotVariant(entry: ManifestEntry, config: object): Promise<object[]> {
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
-  await ctx.plugin(ToolRegistry, {})
+  await ctx.plugin(ToolRuntime, {})
   await ctx.plugin(GitHubRuntime)
   ctx.github.registerProvider(stubProvider())
   await ctx.plugin(entry.plugin as never, config as never)

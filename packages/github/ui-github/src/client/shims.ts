@@ -4,7 +4,7 @@
  * minimal service surface the client half consumes — `ctx.slots`,
  * `ctx.sessions`, and `ctx.remote`. DELETE this module when the package
  * migrates into the dsh workspace and import the real service types
- * (`@deepseek-ai/dsh-client-runtime`, `@deepseek-ai/dsh-api-remotes`)
+ * (`@deepseek-ai/dsh-client-ui-slots`, `@deepseek-ai/dsh-api-remotes`)
  * instead; the shapes below mirror theirs member for member.
  * @module dsh-ui-github/client/shims
  */
@@ -17,6 +17,7 @@ export interface ClientSlotOptions {
   readonly name: string
   readonly id: string
   readonly order: number
+  readonly label?: () => string
 }
 
 /** Runtime props a slot component receives (session-scope slots carry the id). */

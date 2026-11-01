@@ -2,7 +2,7 @@
  * The conversation PR status bar (design §1/§2): mounted above the input,
  * driven by frontend-paced `refreshFlowState` polling (ADR-0009: dsh never
  * forwards `github/flow-state` to the browser) plus an immediate re-sync on
- * `credentials/updated`, hidden for unconnected users. [Create PR] and
+ * credential updates, hidden for unconnected users. [Create PR] and
  * [Merge] go straight to `@Remote` methods (zero model turns); [AI review] is
  * the one button that spends a turn, through `shell.prompt`. Both the
  * flow-state poller and the CI badge poller back off and STOP while the page
@@ -161,16 +161,19 @@ export function PrStatusBar(props: PrStatusBarProps): ReactElement | null {
     // Disconnect (or any credential change) re-derives the state through the
     // host gate, which reads hidden without a token — the bar disappears
     // immediately (M6 DoD).
-    const offCredentials = remote.$on('credentials/updated', () => {
+    const onCredentials = (): void => {
       timers.clearTimeout(handle)
       delay = flowPoll.initialMs
       void tick()
-    })
+    }
+    const offReference = remote.$on('credentials/reference-updated', onCredentials)
+    const offRecord = remote.$on('credentials/record-updated', onCredentials)
     return () => {
       disposed = true
       timers.clearTimeout(handle)
       offVisibility()
-      offCredentials()
+      offReference()
+      offRecord()
     }
   }, [remote, shell, flowPoll, timers, sync])
 

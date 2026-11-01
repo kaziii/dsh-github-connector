@@ -2,9 +2,9 @@
 
 [English](README.md) | 中文
 
-dsh web 客户端的 **GitHub 工作流 UI**（design §1）：两个 React slot 填充件，完全由 `dsh-github-connect` 的 `@Remote` 方法加前端持节奏的轮询驱动（ADR-0009——dsh 不向浏览器转发自定义宿主事件；本 UI 唯一使用的转发事件是 `credentials/updated`）。
+dsh web 客户端的 **GitHub 工作流 UI**（design §1）：两个 React slot 填充件，完全由 `dsh-github-connect` 的 `@Remote` 方法加前端持节奏的轮询驱动（ADR-0009——dsh 不向浏览器转发自定义宿主事件；本 UI 使用的转发事件是 `credentials/reference-updated` 与 `credentials/record-updated`）。
 
-1. **"Connect GitHub" 卡片**（作为 `settings.plugin.item` 卡片落在 dsh 插件 → 插件配置 页，ADR-0008）：[连接 GitHub] 启动 Device Flow——用户码自动复制、授权页自动打开，进度按服务端节奏轮询 `deviceFlowStatus` 获得（`slow_down` 时拉长间隔）；已连接用户看到 `已连接 @login` 与 [断开连接]。token 永不经过前端。
+1. **"Connect GitHub" 卡片**（作为带标签的 `settings.plugins.tab` 标签页落在 dsh 设置 → 内置插件 页，ADR-0008 / ADR-0018）：[连接 GitHub] 启动 Device Flow——用户码自动复制、授权页自动打开，进度按服务端节奏轮询 `deviceFlowStatus` 获得（`slow_down` 时拉长间隔）；已连接用户看到 `已连接 @login` 与 [断开连接]。token 永不经过前端。
 2. **对话 PR 状态条**（`conversation.input.dock` slot），Claude Code 风格的紧凑胶囊条、贴合会话列宽，即 design §1 的三阶段：`repo feat/x +N −M` + [创建 PR] + [×] → `#123 · CI 徽章` + [AI 审查] [Merge ▾]（squash / merge commit / rebase / 在 GitHub 打开）+ [×] → `#123 已合并`，短暂展示后收起。未连接用户不可见；断开连接后立即消失；[×] 收起胶囊直到状态变化。[创建 PR] 单击即经 `sessions.prompt` 交给 agent 回合——模型根据会话上下文归纳标题/描述并用 GitHub 工具创建，按钮保持 loading 至轮询状态迁移（超时兜底，ADR-0011）；[Merge] 直调 `@Remote` 并走不可逆确认；[AI 审查] 同样经 `sessions.prompt` 消耗回合。
 
 两个轮询器都指数退避且**页面不可见时停止**：CI 徽章（`prChecks`）与 flow-state（`refreshFlowState`，未变化的轮次绝不关闭已打开的下拉、丢弃草稿或让已收起的合并横幅复现）——风险表中"轮询不能吃掉 rate limit"的规则。
@@ -21,7 +21,7 @@ const dispose = installGitHubUi(shellAdapter, typertClientRemote, { locale: 'zh-
 
 ## dsh client 半侧（`dsh-ui-github/client`）
 
-`src/client/` 是该端口面向真实 dsh web 部署的成品实现（ADR-0008），采用 dsh client 插件形态：`exports["./client"]` + `dsh.client` 清单、空 node `apply`（其 loader entry 由本包 `cordis.patch.yml` 经 `dsh plugin add` 落位，锚定 dsh 的 client-module 扫描）、以及构建为 dsh 模块加载器执行的 CJS 闭包工厂的 `lib/client.js`（`scripts/build-client-bundle.ts`；仅 react 与 cordis 保持 external）。启动时经 `ctx.remote.$mount` 自行挂载手写的 `githubConnect` contribution——无需改动 dsh 主仓——再经浏览器外壳适配器安装两个界面：设置填充件落为 `settings.plugin.item` 卡片，[AI 审查] 经 `ctx.sessions.scope(sessionId).conversation.send` 发送，外链仅以 http(s) 新标签页打开，locale 跟随页面语言。所消费的 dsh 服务类型以 `src/client/shims.ts` 垫片声明，迁入 dsh 工作区时删除。
+`src/client/` 是该端口面向真实 dsh web 部署的成品实现（ADR-0008），采用 dsh client 插件形态：`exports["./client"]` + `dsh.client` 清单、空 node `apply`（其 loader entry 由本包 `cordis.patch.yml` 经 `dsh plugin add` 落位，锚定 dsh 的 client-module 扫描）、以及构建为 dsh 模块加载器执行的 CJS 闭包工厂的 `lib/client.js`（`scripts/build-client-bundle.ts`；仅 react 与 cordis 保持 external）。启动时经 `ctx.remote.$mount` 自行挂载手写的 `githubConnect` contribution——无需改动 dsh 主仓——再经浏览器外壳适配器安装两个界面：设置填充件落为 `settings.plugins.tab` 中带 “GitHub” 标签的标签页，[AI 审查] 经 `ctx.sessions.scope(sessionId).conversation.send` 发送，外链仅以 http(s) 新标签页打开，locale 跟随页面语言。所消费的 dsh 服务类型以 `src/client/shims.ts` 垫片声明，迁入 dsh 工作区时删除。
 
 ## i18n
 

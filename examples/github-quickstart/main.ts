@@ -19,9 +19,9 @@
 
 import { execFile } from 'node:child_process'
 import { Context } from '@deepseek-ai/cordis'
-import { CallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import { ToolRegistry } from '@deepseek-ai/dsh-tools'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
 import GitHubRuntime, { GitHubError } from 'dsh-github'
 import * as githubRest from 'dsh-github-rest'
 import * as toolGitHub from 'dsh-tool-github'
@@ -49,7 +49,7 @@ async function liveSection(run: () => Promise<void>): Promise<void> {
 
 const ctx = new Context()
 await ctx.plugin(SystemPrompt)
-await ctx.plugin(ToolRegistry, {})
+await ctx.plugin(ToolRuntime, {})
 await ctx.plugin(GitHubRuntime)
 await ctx.plugin(githubRest, { credentialRef: 'GITHUB_TOKEN', baseURL: 'https://api.github.com' })
 await ctx.plugin(toolGitHub, {})           // registers github_search / *_read / write tools
@@ -80,7 +80,7 @@ if (token === undefined || token === '') {
   // Tool execution never throws at the model: refusals come back as an
   // isError result with the tool's friendly presentation.
   const result = await ctx.tools.execute({
-    callId: CallId('quickstart-1'),
+    callId: ToolCallId('quickstart-1'),
     name: 'github_search',
     arguments: { kind: 'issues', query: 'repo:octocat/Hello-World state:open' },
     signal: new AbortController().signal,
