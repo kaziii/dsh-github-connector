@@ -1,6 +1,6 @@
 # 0009. UI 状态更新用轮询与 credentials 事件，不依赖自定义宿主事件转发
 
-- 状态：Accepted
+- 状态：Superseded by 0018
 - 日期：2026-08-14
 
 ## 上下文

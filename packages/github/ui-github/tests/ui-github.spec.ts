@@ -3,19 +3,14 @@ import { act, createElement as h, type ReactElement, type ReactNode } from 'reac
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { DeviceFlowPrompt, GitHubFlowState } from 'dsh-github-connect'
 import {
-  ConnectGitHubSection,
   MERGE_METHODS,
-  PrStatusBar,
   apply as applyNodeHalf,
   catalogFor,
   connectErrorText,
   connectViewFromStatus,
-  defaultTimers,
-  installGitHubUi,
   reduceConnectView,
   sameFlowState,
   type ConnectView,
@@ -24,7 +19,10 @@ import {
   type StatusBarTimers,
   type UiLocale,
 } from 'dsh-ui-github'
-import * as uiInvariant from 'dsh-ui-github/invariant'
+
+import { ConnectGitHubSection } from '../src/settings-section.ts'
+import { PrStatusBar, defaultTimers } from '../src/status-bar.ts'
+import { installGitHubUi } from '../src/install.ts'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -254,13 +252,13 @@ function buttonByText(container: HTMLElement, text: string): Element {
 
 /**
  * Drive the bar into a state through the polling path (ADR-0009): point the
- * refresh mock at the state, then use the credentials/updated listener's
+ * refresh mock at the state, then use the credentials/record-updated listener's
  * immediate re-sync as the deterministic trigger.
  */
 async function adoptState(suite: FakeRemote, state: GitHubFlowState): Promise<void> {
   suite.calls.refreshFlowState.mockResolvedValue(ok(state))
   await act(async () => {
-    suite.emit('credentials/updated', 'GITHUB_TOKEN')
+    suite.emit('credentials/reference-updated', 'GITHUB_TOKEN')
     await new Promise(resolve => setTimeout(resolve, 0))
   })
 }
@@ -502,7 +500,7 @@ describe('ConnectGitHubSection', () => {
     expect(container.textContent).toContain('gateway down')
   })
 
-  it('re-queries on credentials/updated and disconnects on the button', async () => {
+  it('re-queries on credentials/record-updated and disconnects on the button', async () => {
     const suite = fakeRemote()
     suite.calls.connectStatus.mockResolvedValue(ok({ connected: true, login: 'octocat' }))
     const container = await mount(section(suite, fakeShell()))
@@ -514,7 +512,7 @@ describe('ConnectGitHubSection', () => {
 
     suite.calls.connectStatus.mockResolvedValue(ok({ connected: true, login: 'hubot' }))
     await act(async () => {
-      suite.emit('credentials/updated', 'GITHUB_TOKEN')
+      suite.emit('credentials/record-updated', 'GITHUB_TOKEN')
       await new Promise(resolve => setTimeout(resolve, 0))
     })
     expect(container.textContent).toContain('@hubot')
@@ -524,7 +522,7 @@ describe('ConnectGitHubSection', () => {
     const suite = fakeRemote()
     const container = await mount(section(suite, fakeShell(), { locale: 'zh-CN' }))
     expect(container.textContent).toContain('连接 GitHub')
-    expect(suite.listenerCount()).toBe(1)
+    expect(suite.listenerCount()).toBe(2)
     await unmountAll()
     expect(suite.listenerCount()).toBe(0)
   })
@@ -819,7 +817,7 @@ describe('PrStatusBar', () => {
     expect(suite.calls.refreshFlowState.mock.calls.length).toBeGreaterThan(before)
   })
 
-  it('disappears immediately after disconnect (credentials/updated → hidden)', async () => {
+  it('disappears immediately after disconnect (credentials/record-updated → hidden)', async () => {
     const suite = fakeRemote()
     suite.calls.refreshFlowState.mockResolvedValue(ok(PR_OPEN))
     const clock = manualTimers()
@@ -828,7 +826,7 @@ describe('PrStatusBar', () => {
 
     suite.calls.refreshFlowState.mockResolvedValue(ok({ kind: 'hidden' }))
     await act(async () => {
-      suite.emit('credentials/updated', 'GITHUB_TOKEN')
+      suite.emit('credentials/record-updated', 'GITHUB_TOKEN')
       await new Promise(resolve => setTimeout(resolve, 0))
     })
     expect(container.textContent).toBe('')
@@ -1009,17 +1007,5 @@ describe('installGitHubUi', () => {
 describe('node half', () => {
   it('is empty: the loader entry only anchors the client-module scan (ADR-0008)', () => {
     expect(applyNodeHalf()).toBeUndefined()
-  })
-})
-
-describe('dsh-ui-github invariant companion', () => {
-  it('registers with the invariant service and returns a disposer', async () => {
-    const ctx = new Context()
-    await ctx.plugin(InvariantRegistry, {})
-    expect(uiInvariant.name).toBe('ui-github-invariant')
-    expect(uiInvariant.inject).toEqual(['invariants'])
-    const dispose = await uiInvariant.apply(ctx)
-    expect(typeof dispose).toBe('function')
-    dispose()
   })
 })

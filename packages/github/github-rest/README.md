@@ -17,7 +17,7 @@ The **REST v3 provider** for [`dsh-github`](../github/README.md): plain platform
 | `credentialRef` | `GITHUB_TOKEN` | Environment-variable NAME the token resolves through — a reference, never the secret itself, so the settings document stays token-free. |
 | `baseURL` | `https://api.github.com` | API root. Point it at `https://ghes.example.com/api/v3` for GitHub Enterprise Server; trailing slashes are tolerated. |
 
-The config doubles as the `github-rest` settings section (`installSettingsSection`): while a settings seam is mounted, user changes apply LIVE — both fields are re-read on every operation — and when it detaches, the composition entry config takes over again.
+The config doubles as the `github-rest` settings section: both fields are declared `.volatile()`, so dsh projects them into a settings form keyed by the profile entry (no manual registration, see ADR-0018) and user changes apply LIVE — each value is re-read on every operation through its config reference.
 
 ## Credential resolution
 

@@ -17,7 +17,7 @@
 | `credentialRef` | `GITHUB_TOKEN` | token 所经由的环境变量**名**——只是引用、绝不是秘密本身，settings 文档因此不含任何 token 值。 |
 | `baseURL` | `https://api.github.com` | API 根地址。GitHub Enterprise Server 指向 `https://ghes.example.com/api/v3`；容忍尾部斜杠。 |
 
-该配置同时充当 `github-rest` settings 区块（`installSettingsSection`）：settings seam 挂载期间，用户修改**实时生效**——两个字段都在每次操作时重新读取；seam 卸载后自动回退到组合入口配置。
+该配置同时充当 `github-rest` 的 settings 区块：两个字段都声明为 `.volatile()`，由 dsh 按 profile entry 投影成设置表单（插件无需手工注册，见 ADR-0018），用户修改**实时生效**——每次操作都通过配置引用重新读取当前值。
 
 ## 凭据解析
 

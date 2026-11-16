@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Credentials, { type CredentialInfo, type CredentialRef, type ResolvedCredential } from '@deepseek-ai/dsh-credentials'
-import InvariantRegistry from '@deepseek-ai/dsh-invariants'
+import { remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
 import GitHubRuntime, { GitHubError, type GitHubProvider } from 'dsh-github'
 import GitHubConnectService, {
   DEFAULT_CLIENT_ID,
@@ -28,7 +28,6 @@ import GitHubConnectService, {
   type GitHubConnectConfig,
   type GitHubFlowState,
 } from 'dsh-github-connect'
-import * as connectInvariant from 'dsh-github-connect/invariant'
 
 // —— shared helpers ———————————————————————————————————————————————————————————
 
@@ -237,7 +236,7 @@ async function mountService(config: GitHubConnectConfig, options: { provider?: P
   const credentialUpdates: string[] = []
   ctx.on('github/flow-state', state => void flowStates.push(state))
   ctx.on('github/device-flow', update => void deviceUpdates.push(update))
-  ctx.on('credentials/updated', ref => void credentialUpdates.push(ref as string))
+  ctx.on('credentials/reference-updated', ref => void credentialUpdates.push(ref))
   let turn = 0
   return {
     ctx,
@@ -642,6 +641,18 @@ describe('GitHubConnectService device flow', () => {
   })
 })
 
+describe('GitHubConnectService Remote binding', () => {
+  it('exports its direct methods under the githubConnect namespace', async () => {
+    const { service } = await mountService({})
+    expect(service.typertRemote.serviceKey).toBe('githubConnect')
+    expect(service.typertRemote.namespace).toBe('githubConnect')
+    expect(remoteMethods(service).map(({ method, invocation }) => ({ method, invocation }))).toEqual(
+      ['connectStatus', 'startDeviceFlow', 'deviceFlowStatus', 'disconnect', 'prDraft', 'createPr', 'mergePr', 'prChecks', 'refreshFlowState']
+        .map(method => ({ method, invocation: { kind: 'direct' } })),
+    )
+  })
+})
+
 describe('GitHubConnectService connectStatus', () => {
   const userRoute = (login: unknown): Route => ({
     match: url => url.endsWith('/user'),
@@ -672,7 +683,9 @@ describe('GitHubConnectService connectStatus', () => {
     await suite.credentials.set('OTHER_REF' as CredentialRef, 'x')
     await suite.service.connectStatus()
     expect(calls).toHaveLength(1)
-    await suite.credentials.set('GITHUB_TOKEN' as CredentialRef, 'gho_2')
+    // Reusing the same token proves the event, rather than the token cache key,
+    // invalidates the cached login.
+    await suite.credentials.set('GITHUB_TOKEN' as CredentialRef, 'gho_1')
     await suite.service.connectStatus()
     expect(calls).toHaveLength(2)
   })
@@ -1145,17 +1158,5 @@ describe('session workspace resolution (ADR-0010)', () => {
     await suite.credentials.set('GITHUB_TOKEN' as CredentialRef, 'gho_1')
     // Never throws, whatever the surrounding checkout looks like.
     await suite.turnEnd()
-  })
-})
-
-describe('dsh-github-connect invariant companion', () => {
-  it('registers with the invariant service and returns a disposer', async () => {
-    const ctx = new Context()
-    await ctx.plugin(InvariantRegistry, {})
-    expect(connectInvariant.name).toBe('github-connect-invariant')
-    expect(connectInvariant.inject).toEqual(['invariants'])
-    const dispose = await connectInvariant.apply(ctx)
-    expect(typeof dispose).toBe('function')
-    dispose()
   })
 })

@@ -2,7 +2,7 @@
  * The browser-side {@link GitHubUiShell} adapter (ADR-0008): binds the port's
  * members to the dsh client services and plain browser facilities.
  *
- * - `registerSlot('settings.section')` narrows to a `settings.plugin.item`
+ * - `registerSlot('settings.section')` narrows to a `settings.plugins.tab`
  *   card (the "插件 → 插件配置" page); the dock keeps its slot name.
  * - `prompt` sends into the session the dock last rendered for — v1 renders
  *   one active conversation at a time, matching the dsh web layout.
@@ -18,7 +18,7 @@ import type { ClientSlotProps } from './shims.ts'
 
 /** Where each port slot id lands in the dsh slot registry (ADR-0008). */
 const SLOT_TARGETS: Record<GitHubUiSlotId, string> = {
-  'settings.section': 'settings.plugin.item',
+  'settings.section': 'settings.plugins.tab',
   'conversation.input.dock': 'conversation.input.dock',
 }
 
@@ -40,7 +40,7 @@ export function createBrowserShell(ctx: Context): GitHubUiShell {
         return render()
       }
       return ctx.slots.inject(target, () =>
-        ctx.slots.register({ name: target, id: 'github', order: SLOT_ORDER }, component))
+        ctx.slots.register({ name: target, id: 'github', order: SLOT_ORDER, ...(slot === 'settings.section' ? { label: () => 'GitHub' } : {}) }, component))
     },
     sessionId: () => currentSession,
     prompt: text => {

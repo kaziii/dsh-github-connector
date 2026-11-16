@@ -8,10 +8,9 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { assertNever } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { GitHubComment, GitHubDiff, GitHubIssue, GitHubItemRef, GitHubPullRequest } from 'dsh-github'
-import { assertPositiveArg, parseRepoInput, repoLabel, runGitHub, type ResolvedToolGitHubConfig } from './shared.ts'
+import { assertNever, assertPositiveArg, parseRepoInput, repoLabel, runGitHub, type ResolvedToolGitHubConfig } from './shared.ts'
 
 /** The PR read parts — a CLOSED union consumers switch over. */
 export type PullRequestReadPart = 'metadata' | 'diff' | 'comments' | 'reviews' | 'checks' | 'ci-failures'

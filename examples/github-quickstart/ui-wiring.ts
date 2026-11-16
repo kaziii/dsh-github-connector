@@ -1,19 +1,23 @@
 /**
- * The full UI path, as wiring: what the dsh web client's one-file adapter
- * looks like when it mounts `dsh-ui-github` (ADR-0007). This module
- * typechecks against the real contracts but is not executed here — the slot
- * registry, Typert Client Remote, and approval surface exist only inside the
- * dsh web client. Copy `wireGitHubUi` into that adapter and replace each
- * `shell` member with the client's real facility.
+ * The UI port shape, as wiring: the members `dsh-ui-github`'s shipped client
+ * half binds to the dsh web client (ADR-0007 / ADR-0008). Since dsh 0.2.x the
+ * package ships that client half itself (`dsh.client` + `lib/client.js`, with
+ * UI code kept out of the node entry), so this module is a reference for the
+ * port contract, not an adapter to copy into dsh. This module typechecks
+ * against the real contracts but is not executed here — the slot registry,
+ * Typert Client Remote, and approval surface exist only inside the dsh web
+ * client.
  * @module github-quickstart/ui-wiring
  */
 
 import {
-  installGitHubUi,
   type GitHubUiRemote,
   type GitHubUiShell,
   type GitHubUiSlotId,
 } from 'dsh-ui-github'
+// The installer lives in the browser half (react is client-only in dsh 0.2.x);
+// the node entry intentionally exports no runtime UI values.
+import { installGitHubUi } from 'dsh-ui-github/src/install.ts'
 import type { ReactNode } from 'react'
 
 /** The client facilities the adapter bridges (design §7 names in comments). */

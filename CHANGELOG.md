@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+本轮修复并验证 dsh 0.2.x 兼容性（当前验证宿主为 `0.2.2-rc.3`；见 [ADR-0018](docs/adr/0018-dsh-0-2-1-rc-5-compatibility.md)）。宿主 0.2.x 相对本仓库开发时的 0.1.x 有破坏性变化，旧版本无法通过 dsh 的插件兼容性闸门（上游 issues [#16](https://github.com/kaziii/dsh-github-connector/issues/16) / [#17](https://github.com/kaziii/dsh-github-connector/issues/17)），即使放行也会在启动时 import 失败。
+
+- **兼容性声明** — 五个包新增 `engines.dsh: ">=0.2.1-rc.5 <0.3.0"`；peer 范围覆盖 dsh 0.2.x，dev 依赖与锁文件已用 `0.2.2-rc.3` / Cordis `~4.1.0` 验证。**dsh 0.1.x 不再支持。**
+- **移除 `./invariant` 伴生插件** — 宿主删除了 `@deepseek-ai/dsh-invariants` 包与 `ctx.invariants` 服务；五个包删除 `src/invariant.ts`、`./invariant` 子导出与相关测试。这些 companion 原本就是空实现，行为无损。
+- **设置区迁移**（`dsh-github-rest`）— 不再使用已删除的 `installSettingsSection` / `settingsNamespace`；`credentialRef` / `baseURL` 改为 `Config` 的 `.volatile()` 字段，由 dsh 按 profile entry 投影成设置表单，每次操作通过配置引用读取当前值，不再需要 detach 回退逻辑。
+- **凭据事件**（`dsh-github-connect` / `dsh-ui-github`）— `credentials/updated` 拆分为 `credentials/reference-updated`（引用变化）与 `credentials/record-updated`（记录键变化）；连接状态缓存只在更新的引用等于配置的 `credentialRef` 时失效。`@Remote` 方法名与签名不变。
+- **工具注册**（`dsh-tool-github`）— 宿主注册中心 `ToolRegistry` → `ToolRuntime`；调用标识 `CallId` → `ToolCallId`；`dsh-llm` 不再导出 `assertNever`，改用包内本地实现。工具 schema / 审批 / 超时接线不变（测试补齐超时元数据与调用方取消信号断言）。
+- **客户端插件**（`dsh-ui-github`）— 按 0.2.x 客户端插件契约更新 `dsh.client` 清单，node 半侧不再 import react（react 只存在于浏览器基线模块表），`lib/client.js` 仍由 `scripts/build-client-bundle.ts` 产出。
+- **示例与文档** — `examples/github-quickstart` 更新到新宿主 API；新增 ADR-0018，更新 design / AGENTS / 执行计划 / 各包双语 README。
+
+验证：`pnpm typecheck` / `pnpm test` / `pnpm build` / `pnpm gate:catalog` 全绿；在隔离 `DSH_HOME` 的 web profile 中 `dsh plugin add`（无版本豁免）安装成功且五个插件条目全部激活。真实 GitHub token 的 REST 调用与 Device Flow 端到端仍需手工验收。
+
 ## dsh-github-connect 0.1.1 (2026-08-14)
 
 - **Zero-setup Device Flow** — `clientId` now defaults to the project's shared `dsh-github-connector` OAuth App (`DEFAULT_CLIENT_ID`, Device Flow enabled), so a fresh install connects without any configuration — the same ship-the-public-client-id pattern the GitHub CLI uses. GHES deployments still override it with an App registered on their own instance.
@@ -7,8 +21,6 @@
 ## dsh-ui-github 0.1.1 (2026-08-14)
 
 - **Fix: namespace access without inject** — the client half handed `ctx.remote` straight to the React surfaces, so their first `remote.githubConnect` access re-entered the cordis inject check and threw `cannot get property "remote.githubConnect" without inject` (the plugin mounts that namespace itself and must not inject it — ADR-0008). The surfaces now receive a thin face that resolves the namespace per access through inject-free `ctx.get('remote.githubConnect')`, with `$on` still riding the injected gateway service.
-
-## Unreleased
 
 M10 — the write half of the review loop, closing v2:
 
@@ -36,7 +48,7 @@ M8 — the read half of the v2 review loop (ADR-0012), so the model can act on r
 
 The dsh client adapter (ADR-0008/ADR-0009), landing the real web-deployment path for `dsh-ui-github`:
 
-- **Polling instead of forwarded events (ADR-0009)** — dsh forwards no custom host events to the browser, so the UI now drives itself: the connect card polls the new `@Remote deviceFlowStatus()` at the server-dictated pace (a superseded flow's updates are dropped host-side), and the status bar polls `refreshFlowState` with backoff, pauses while hidden, keeps open dropdowns and drafts across unchanged rounds, folds CI changes into the badge in place, and remembers a collapsed merged banner. The Typert event selection narrows to `credentials/updated`.
+- **Polling instead of forwarded events (ADR-0009)** — dsh forwards no custom host events to the browser, so the UI now drives itself: the connect card polls the new `@Remote deviceFlowStatus()` at the server-dictated pace (a superseded flow's updates are dropped host-side), and the status bar polls `refreshFlowState` with backoff, pauses while hidden, keeps open dropdowns and drafts across unchanged rounds, folds CI changes into the badge in place, and remembers a collapsed merged banner. The Typert event selection narrows to `credentials/reference-updated`.
 - **`dsh-ui-github/client` (ADR-0008)** — the shipped dsh client half: `dsh.client` manifest + `exports["./client"]`, an empty node `apply` anchored by the package's own `cordis.patch.yml` (so `dsh plugin add` wires the whole UI), a hand-written strict `githubConnect` Typert contribution self-mounted through `ctx.remote.$mount` (no dsh-repo change), the browser shell adapter (plugin-config card, session-scoped [AI review] prompt, http(s)-only external links, clipboard, visibility), and `lib/client.js` built as the dsh CJS closure factory (`scripts/build-client-bundle.ts`, esbuild).
 
 ## 0.1.0 (2026-08-14) — v1

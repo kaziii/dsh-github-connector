@@ -16,7 +16,7 @@
 export function apply(): void {}
 
 export { catalogFor, type UiCatalog, type UiLocale } from './i18n.ts'
-export { installGitHubUi, type GitHubUiOptions } from './install.ts'
+export type { GitHubUiOptions } from './install.ts'
 export {
   MERGE_METHODS,
   connectErrorText,
@@ -25,7 +25,7 @@ export {
   sameFlowState,
   type ConnectView,
 } from './model.ts'
-export { ConnectGitHubSection, type ConnectSectionProps } from './settings-section.ts'
+export type { ConnectSectionProps } from './settings-section.ts'
 export {
   type ConnectStatus,
   type GitHubUiRemote,
@@ -34,8 +34,6 @@ export {
   type GitHubUiVisibility,
 } from './types.ts'
 export {
-  PrStatusBar,
-  defaultTimers,
   type PollPolicy,
   type PrStatusBarProps,
   type StatusBarTimers,

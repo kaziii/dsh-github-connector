@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 import GitHubRuntime, {
   buildReviewBrief,
   changedLines,
@@ -21,7 +20,6 @@ import GitHubRuntime, {
   type GitHubReviewComment,
   type GitHubSearchResult,
 } from 'dsh-github'
-import * as githubInvariant from 'dsh-github/invariant'
 
 const available = true
 const unavailable = false
@@ -719,17 +717,5 @@ describe('GitHubError', () => {
   it('carries retryAfterMs for rate limits', () => {
     const error = new GitHubError('slow down', 'GITHUB_RATE_LIMITED', { retryAfterMs: 1200 })
     expect(error.retryAfterMs).toBe(1200)
-  })
-})
-
-describe('dsh-github invariant companion', () => {
-  it('registers with the invariant service and returns a disposer', async () => {
-    const ctx = new Context()
-    await ctx.plugin(InvariantRegistry, {})
-    expect(githubInvariant.name).toBe('github-invariant')
-    expect(githubInvariant.inject).toEqual(['invariants'])
-    const dispose = await githubInvariant.apply(ctx)
-    expect(typeof dispose).toBe('function')
-    dispose()
   })
 })

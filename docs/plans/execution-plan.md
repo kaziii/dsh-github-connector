@@ -2,6 +2,7 @@
 
 > 状态：v1（M1–M7）全部完成（见根 [CHANGELOG.md](../../CHANGELOG.md)）；v2「审查闭环」（范围决策见 [ADR-0012](../adr/0012-pr-review-loop-enters-scope.md)）：**M8–M10 全部完成**，v2 审查闭环打通（仅 M10 的真实仓库手工验收挂起）。dsh 宿主 CLI（`@deepseek-ai/dsh`）已验证可安装并激活本连接器（`dsh.bundle` patch，见 M3 验收注记）；仅剩两项手工验收挂起：M3 的模型驱动 CLI 走查（只差真实 API key）与 M6 的端到端 UI 脚本（dsh 源码核实后绑定路径已定：连接入口为"插件配置"卡片、端口映射见 [ADR-0008](../adr/0008-settings-card-entry-and-real-slot-binding.md) 与 design §7，待 client 适配层落地后执行；脚本已写入 [PR #5](https://github.com/kaziii/dsh-github-connector/pull/5) 描述）。**v3「跨机器同步」（范围决策见 [ADR-0016](../adr/0016-config-sync-via-github-repo.md) 与 [ADR-0017](../adr/0017-session-sync-readonly-with-fork-continuation.md)）：已拆解、未开工 —— M11 配置同步、M12 session 同步。** 依据 [design.md](../design/design.md) 拆解为可直接开工的里程碑与任务清单，设计取舍的理由见 [ADR](../adr/README.md)。
 > 原则：每个里程碑结束时**产物独立可用、可测、可合并**；严格按依赖顺序推进，不并行开新面。
+> 兼容性：本仓库已适配 dsh `0.2.x`，并用 `0.2.2-rc.3` 验证（[ADR-0018](../adr/0018-dsh-0-2-1-rc-5-compatibility.md)）。宿主移除了 invariants 服务与 `./invariant` 伴生插件、设置区改由 `Config` 的 `.volatile()` 字段投影、凭据事件改为 `credentials/reference-updated`；下文 M1/M2 里出现的 `./invariant` 与 `installSettingsSection` 表述属历史记录。
 
 ## 0. 总览
 
@@ -132,7 +133,7 @@ v3（M11–M12，范围决策见 [ADR-0016](../adr/0016-config-sync-via-github-r
 1. Device Flow：
    - `POST /login/device/code`（只需 client_id）→ 返回 `user_code` / `verification_uri` / `interval`
    - 宿主按 `interval` 轮询 `POST /login/oauth/access_token`，处理 `authorization_pending` / `slow_down`(+5s) / `expired_token` / `access_denied`
-   - 成功 → `ctx.credentials.set('GITHUB_TOKEN', ...)` → `credentials/updated` 事件推前端
+   - 成功 → `ctx.credentials.set('GITHUB_TOKEN', ...)` → `credentials/reference-updated` 事件推前端
    - v1 用不过期授权模式（refresh 二期，design §5 已记录空白）
 2. `@Remote` 方法（照 `packages/feedback/message-feedback` 全栈模板）：
    - `connectStatus()`：凭据可解析？→ 查 `/user` 拿登录名（带缓存）
@@ -148,7 +149,7 @@ v3（M11–M12，范围决策见 [ADR-0016](../adr/0016-config-sync-via-github-r
 - [x] Device Flow 状态机全路径测试（pending / slow_down / expired / denied / 成功），GitHub 端点全 mock
 - [x] flow-state 检测在 fixture git 仓库上测：无领先 / 领先无 PR / PR 开 / PR 合并四态迁移
 - [x] 回合结束无新提交时不发事件（防噪声）
-- [x] `credentials/updated` 白名单转发验证（Device Flow 成功 → `credentials.set` → 事件广播全链路测试）
+- [x] `credentials/reference-updated` 白名单转发验证（Device Flow 成功 → `credentials.set` → 事件广播全链路测试）
 
 ---
 
@@ -156,7 +157,7 @@ v3（M11–M12，范围决策见 [ADR-0016](../adr/0016-config-sync-via-github-r
 
 ### 任务
 
-1. GitHub 连接卡片（注册 `settings.plugin.item` slot，落在"插件 → 插件配置"页，ADR-0008；实现时以 `GitHubUiShell` 端口的 `settings.section` 名义开发，适配层收窄为卡片）：
+1. GitHub 连接标签（注册 `settings.plugins.tab` slot，落在"插件"设置页，ADR-0018；实现时以 `GitHubUiShell` 端口的 `settings.section` 名义开发，适配层收窄为标签）：
    - 未连接：[Connect GitHub] 按钮 → `window.open` 授权页 + user_code 自动复制 + 等待态
    - 已连接：`已连接 @用户名` + [断开]
 2. PR 状态条（注册 `conversation.input.dock` slot），三阶段 UI 照 design §1：
@@ -171,7 +172,7 @@ v3（M11–M12，范围决策见 [ADR-0016](../adr/0016-config-sync-via-github-r
 
 - [x] 组件测试：四态渲染 + 事件驱动迁移
 - [x] 断开连接后状态条立即消失
-- [ ] **端到端手工验收脚本**（写进 PR 描述）：连接 → agent 提交 → 状态条出现 → 创建 PR → CI 徽章 → AI 审查 → merge → 收起（适配层已落地：`dsh-ui-github/client` 半侧 + 自带 `cordis.patch.yml`，`dsh plugin add` 即接全链路;事件面按 ADR-0009 为 `credentials/updated` + 轮询。剩余步骤仅为在真实 dsh 宿主里执行脚本本身）
+- [ ] **端到端手工验收脚本**（写进 PR 描述）：连接 → agent 提交 → 状态条出现 → 创建 PR → CI 徽章 → AI 审查 → merge → 收起（适配层已落地：`dsh-ui-github/client` 半侧 + 自带 `cordis.patch.yml`，`dsh plugin add` 即接全链路；事件面按 ADR-0009 为 `credentials/reference-updated` + 轮询。剩余步骤仅为在真实 dsh 宿主里执行脚本本身）
 
 ---
 

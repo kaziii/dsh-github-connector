@@ -219,15 +219,15 @@ export class GitHubConnectService extends TypertRemoteService {
     // Defensive chaining on the payload: detection is best-effort and must
     // never break the turn, even under a host that emits a leaner shape.
     ctx.on('agent/turn-stopping', payload => this.onTurnEnd(payload?.agent?.session?.header?.cwd))
-    ctx.on('credentials/updated', ref => {
-      if ((ref as string) === this.config.credentialRef) this.statusCache = undefined
+    ctx.on('credentials/reference-updated', ref => {
+      if (ref === this.config.credentialRef) this.statusCache = undefined
     })
     ctx.effect(() => () => this.activeFlow?.abort(), 'githubConnect.abortDeviceFlow')
   }
 
   /**
    * Whether a usable credential exists, and who it authenticates as. The
-   * login lookup is cached per token and invalidated by `credentials/updated`.
+   * login lookup is cached per token and invalidated by `credentials/reference-updated`.
    * @returns the connection state for the settings section.
    */
   @Remote
@@ -252,7 +252,7 @@ export class GitHubConnectService extends TypertRemoteService {
    * Begin one Device Flow: returns the user prompt immediately and keeps
    * polling in the background, pushing progress over `github/device-flow`.
    * On success the token lands in the credentials seam, whose
-   * `credentials/updated` event refreshes every consumer — no restart.
+   * `credentials/reference-updated` event refreshes consumers — no restart.
    * A new start aborts any previous in-flight flow.
    * @returns the code and URL the frontend shows (and auto-copies).
    */

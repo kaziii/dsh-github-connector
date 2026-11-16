@@ -8,6 +8,11 @@
 
 import { GitHubError, type GitHubRepoRef } from 'dsh-github'
 
+/** Reject a value outside a closed union, while keeping switches exhaustive. */
+export function assertNever(value: never, label: string): never {
+  throw new Error(`Unexpected ${label}: ${String(value)}`)
+}
+
 /** Resolved plugin config: every field present (schema defaults applied). */
 export interface ResolvedToolGitHubConfig {
   readonly write: boolean
