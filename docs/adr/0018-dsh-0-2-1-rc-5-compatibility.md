@@ -1,11 +1,11 @@
-# 0018. 适配 dsh 0.2.1-rc.5：以宿主 0.2.x 接口为准，移除 invariant 伴生插件
+# 0018. 适配 dsh 0.2.x：以宿主接口为准，移除 invariant 伴生插件
 
 - 状态：Accepted
-- 日期：2026-11-01
+- 日期：2026-11-16
 
 ## 上下文
 
-本仓库开发时的宿主是 dsh `0.0.1-rc.1` / `0.1.0-rc.6`。宿主升级到 `0.2.1-rc.5` 后出现一组成对的破坏性变化，用户侧表现为「插件装不上」（上游 issue #16 / #17：兼容性闸门拒绝安装），即使强行放行也会在启动时 import 失败：
+本仓库开发时的宿主是 dsh `0.0.1-rc.1` / `0.1.0-rc.6`。宿主升级到 dsh `0.2.x` 后出现一组成对的破坏性变化，用户侧表现为「插件装不上」（上游 issue #16 / #17：兼容性闸门拒绝安装），即使强行放行也会在启动时 import 失败：
 
 - **兼容性闸门**：`@deepseek-ai/dsh-app-boot` 的 `evaluatePluginCompatibility` 在插件声明 `engines.dsh` 时只看该字段，否则逐条校验 `@deepseek-ai/dsh*` peer 范围（含 prerelease）。旧的 peer 范围（`^0.0.1-rc.1` / `^0.1.0-rc.6`）无法匹配 `0.2.1-rc.5`。
 - **invariant 机制移除**：宿主不再包含 `@deepseek-ai/dsh-invariants` 包，也没有 `ctx.invariants` 服务与 `./invariant` 伴生插件的加载路径。
@@ -16,7 +16,7 @@
 
 ## 决策
 
-1. 目标宿主固定为 dsh `0.2.1-rc.5`：五个插件包声明 `engines.dsh: ">=0.2.1-rc.5 <0.3.0"`，peer/dev 依赖整体对齐 `0.2.1-rc.5`（`@deepseek-ai/cordis` 对齐 `~4.0.5`）。
+1. 目标宿主为 dsh `0.2.x`：五个插件包声明 `engines.dsh: ">=0.2.1-rc.5 <0.3.0"`，peer 范围覆盖同一 0.2.x 大版本；开发依赖已用 dsh `0.2.2-rc.3` 与 Cordis `~4.1.0` 验证。
 2. 删除全部 `./invariant` 子导出、`src/invariant.ts` 伴生插件、`@deepseek-ai/dsh-invariants` 依赖及其测试；该门槛从工程约定中移除。
 3. 设置区迁移到 `Config` 的 `.volatile()` 字段 + profile entry 定位，不再手工注册 settings namespace；provider 改为直接读配置引用（每次操作重新解析）。
 4. 凭据监听迁移到 `credentials/reference-updated`，只在更新的引用等于配置的 `credentialRef` 时失效登录状态缓存。

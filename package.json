@@ -5,7 +5,7 @@
   "private": true,
   "license": "MIT",
   "type": "module",
-  "packageManager": "pnpm@11.28.5",
+  "packageManager": "pnpm@10.33.0",
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
   },
@@ -19,9 +19,9 @@
     "gate:catalog": "pnpm build && node scripts/gen-tool-catalog.ts --check"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "~4.0.5",
-    "@deepseek-ai/dsh-system-prompt": "0.2.1-rc.5",
-    "@deepseek-ai/dsh-tools": "0.2.1-rc.5",
+    "@deepseek-ai/cordis": "~4.1.0",
+    "@deepseek-ai/dsh-system-prompt": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.3",
     "@types/node": "^22.15.0",
     "@vitest/coverage-v8": "^3.2.4",
     "dsh-github": "workspace:*",

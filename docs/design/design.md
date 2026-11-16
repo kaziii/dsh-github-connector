@@ -46,7 +46,7 @@ PR 已合并                      →  确认后收起
 | `dsh-tool-github` | packages/github/tool-github（agent preset） | **Consumer**：`ctx.tools.register(defineTool(...))` 注册模型工具，`write` 开关（v2 增 `reviewVerdicts` 开关，默认关，ADR-0014） |
 | `dsh-github-connect` | host | Device Flow 授权 + git flow-state 检测 + `@Remote` 方法（`createPr` / `mergePr` / `connectStatus`）供前端按钮直调 |
 | `dsh-github-sync` | packages/github/github-sync（host） | **v3**：配置与 session 的跨机器同步（ADR-0016 / 0017）。自持注入式 git runner（不复用 `dsh-github-connect` 的私有 helper）；session 侧经 `SessionSyncPort` 收口，不让 git 语义外泄到上层 |
-| `dsh-ui-github` | client（React） | "插件 → 插件配置"页 GitHub 连接卡片（注册 `settings.plugin.item` slot，ADR-0008）+ 输入框上方 PR 状态条（注册 `conversation.input.dock` slot）；v3 在连接卡片内增同步开关与远端 session 浏览入口 |
+| `dsh-ui-github` | client（React） | "插件"设置页 GitHub 连接标签（注册 `settings.plugins.tab` slot，ADR-0018）+ 输入框上方 PR 状态条（注册 `conversation.input.dock` slot）；v3 在连接卡片内增同步开关与远端 session 浏览入口 |
 
 组合分层：Service Definition + Provider 进 host 组合（bundle patch），tool 进 agent preset —— 与 dsh web 家族"服务在宿主、工具在 preset"一致。
 
@@ -166,7 +166,7 @@ M9 起 [AI 审查] 的 prompt 已改为引导模型调用 `github_pr_review`（A
 - `ctx.credentials.set/resolve` + `credentials/reference-updated` 事件转发白名单
 - `ctx.tools.register(defineTool)` + `presentCall/presentResult`（纯函数，session 回放要求）
 - `tools/pre-execute` 审批流 + `ApprovalPanel`（写操作确认）
-- client slot 系统：`settings.plugin.item`（连接卡片，ADR-0008）、`conversation.input.dock`、`tool.call.toolview`
+- client slot 系统：`settings.plugins.tab`（GitHub 连接标签，ADR-0018）、`conversation.input.dock`、`tool.call.toolview`
 - Typert Remote（`@Remote` 方法，前端直调宿主）；全栈模板：`packages/feedback/message-feedback`
 - `sessions.prompt`（按钮触发模型回合）
 
@@ -174,7 +174,7 @@ M9 起 [AI 审查] 的 prompt 已改为引导模型调用 `github_pr_review`（A
 
 | 端口成员 | dsh 真实落点 |
 |---|---|
-| `registerSlot('settings.section')` | `ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({ name, id: 'github', locale, inject }, Card))`（入口收窄为卡片） |
+| `registerSlot('settings.section')` | `ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({ name, id: 'github', locale, inject }, Card))`（入口收窄为设置标签） |
 | `registerSlot('conversation.input.dock')` | 同上，`name: 'conversation.input.dock'`；模板 `packages/client/ui-goal/src/client/index.ts` |
 | `prompt(text)` | `ctx.sessions.scope(sessionId).conversation.send(text)` |
 | `copyText(text)` | `writeClipboard` / `useCopyFeedback`（`@deepseek-ai/dsh-client-ui-primitives`） |

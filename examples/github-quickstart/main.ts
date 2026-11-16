@@ -80,12 +80,15 @@ if (token === undefined || token === '') {
   // Tool execution never throws at the model: refusals come back as an
   // isError result with the tool's friendly presentation.
   const result = await ctx.tools.execute({
-    callId: ToolCallId('quickstart-1'),
-    name: 'github_search',
-    arguments: { kind: 'issues', query: 'repo:octocat/Hello-World state:open' },
+    calls: [{
+      type: 'tool-call',
+      id: ToolCallId('quickstart-1'),
+      name: 'github_search',
+      arguments: JSON.stringify({ kind: 'issues', query: 'repo:octocat/Hello-World state:open' }),
+    }],
     signal: new AbortController().signal,
   })
-  const [block] = result.content
+  const [block] = result.results[0]?.result.content ?? []
   console.log(block !== undefined && block.type === 'text' ? block.text : '(no text block)')
 }
 

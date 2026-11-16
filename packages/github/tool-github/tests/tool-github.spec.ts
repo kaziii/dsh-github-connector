@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { Context, Service } from '@deepseek-ai/cordis'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { NativeToolExecutor } from '@deepseek-ai/dsh-tool-executor-native'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import { ToolRuntime, type ToolExecutionResult, type ToolResult } from '@deepseek-ai/dsh-tools'
 import GitHubRuntime, {
@@ -188,6 +189,7 @@ async function mountSuite(config: toolGitHub.Config = {}, options: { approval?: 
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime, {})
+  ctx.tools.setExecutor(new NativeToolExecutor(ctx))
   await ctx.plugin(GitHubRuntime)
   let approval: FakeApproval | undefined
   if (options.approval === true) {
@@ -202,13 +204,21 @@ async function mountSuite(config: toolGitHub.Config = {}, options: { approval?: 
     ctx,
     provider,
     ...approval === undefined ? {} : { approval },
-    run: (name, args, runOptions = {}) => ctx.tools.execute({
-      callId: ToolCallId(`call-${calls++}`),
-      name,
-      arguments: args,
-      signal: runOptions.signal ?? new AbortController().signal,
-      ...runOptions.withAgent === true ? { agent } : {},
-    }),
+    run: async (name, args, runOptions = {}) => {
+      const batch = await ctx.tools.execute({
+        calls: [{
+          type: 'tool-call',
+          id: ToolCallId(`call-${calls++}`),
+          name,
+          arguments: JSON.stringify(args),
+        }],
+        signal: runOptions.signal ?? new AbortController().signal,
+        ...runOptions.withAgent === true ? { agent } : {},
+      })
+      const result = batch.results[0]?.result
+      if (result === undefined) throw new Error(`tool ${name} produced no result`)
+      return result
+    },
   }
 }
 
